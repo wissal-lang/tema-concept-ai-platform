@@ -1,0 +1,82 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Admin {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  createdAt DateTime @default(now())
+}
+
+model Service {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  icon        String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+}
+
+enum DevisStatus {
+  NOUVELLE
+  EN_COURS
+  DEVIS_ENVOYE
+  CLOTUREE
+}
+
+model DevisRequest {
+  id          String      @id @default(cuid())
+  fullName    String
+  email       String
+  phone       String?
+  projectType String
+  budget      String?
+  description String
+  status      DevisStatus @default(NOUVELLE)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+enum ContactStatus {
+  NON_LU
+  LU
+  REPONDU
+}
+
+model ContactMessage {
+  id        String        @id @default(cuid())
+  fullName  String
+  email     String
+  subject   String?
+  message   String
+  status    ContactStatus @default(NON_LU)
+  createdAt DateTime      @default(now())
+}
+
+model ChatConversation {
+  id        String        @id @default(cuid())
+  visitorId String?
+  createdAt DateTime      @default(now())
+  messages  ChatMessage[]
+}
+
+enum MessageSender {
+  USER
+  BOT
+}
+
+model ChatMessage {
+  id             String           @id @default(cuid())
+  conversationId String
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         MessageSender
+  content        String
+  createdAt      DateTime         @default(now())
+}
