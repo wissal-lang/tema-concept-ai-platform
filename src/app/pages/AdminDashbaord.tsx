@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import {
   LayoutDashboard,
@@ -18,17 +18,19 @@ import {
   Send,
   Download,
   UserPlus,
-  TrendingUp,
   TrendingDown,
   Clock,
-  CheckCircle,
-  Activity,
   MoreVertical,
   Phone,
   ArrowUpRight,
   MessageCircle,
   ChevronRight,
   Zap,
+  ShieldCheck,
+  SlidersHorizontal,
+  Sparkles,
+  MessageSquareMore,
+  BadgeCheck,
 } from "lucide-react";
 import {
   AreaChart,
@@ -43,6 +45,7 @@ import {
   Cell,
 } from "recharts";
 import StatusBadge from "../components/StatusBadge";
+import { createAdmin, deleteAdmin, getAdmins, getConversations, getSettings, handoffConversation, sendChatMessage, updateAdmin, updateSetting } from "../../services/api";
 
 type TabType = "overview" | "requests" | "messages" | "conversations" | "services" | "users" | "settings";
 
@@ -121,6 +124,58 @@ const serviceDistribution = [
   { name: "Infrastructure", value: 28, color: "#F59E0B" },
 ];
 
+const settingsSections = [
+  {
+    title: "Profil administrateur",
+    description: "Gérez votre identité, votre email et votre mot de passe.",
+    icon: UserPlus,
+    accent: "from-blue-600 to-blue-500",
+    details: ["Nom", "Email", "Mot de passe", "Avatar"],
+  },
+  {
+    title: "Informations de l’entreprise",
+    description: "Personnalisez les informations visibles sur votre plateforme.",
+    icon: Briefcase,
+    accent: "from-slate-700 to-slate-600",
+    details: ["Nom", "Logo", "Email", "Téléphone", "Adresse", "Réseaux"],
+  },
+  {
+    title: "Gestion des services",
+    description: "Ajoutez, modifiez et organisez vos offres de services.",
+    icon: SlidersHorizontal,
+    accent: "from-emerald-600 to-emerald-500",
+    details: ["Ajouter", "Modifier", "Activer", "Ordre d’affichage"],
+  },
+  {
+    title: "Demandes de devis",
+    description: "Définissez les notifications et l’email de réception.",
+    icon: FileText,
+    accent: "from-violet-600 to-violet-500",
+    details: ["Email", "Statut", "Notifications", "Message auto"],
+  },
+  {
+    title: "Chatbot IA",
+    description: "Contrôlez le comportement et le ton de votre assistant IA.",
+    icon: Bot,
+    accent: "from-cyan-600 to-cyan-500",
+    details: ["Activer", "Nom", "Accueil", "Ton", "FAQ"],
+  },
+  {
+    title: "Notifications",
+    description: "Choisissez les alertes à recevoir par email et dashboard.",
+    icon: Bell,
+    accent: "from-amber-500 to-orange-500",
+    details: ["Devis", "Contact", "Chatbot", "Dashboard"],
+  },
+  {
+    title: "Sécurité",
+    description: "Renforcez la protection de votre espace administrateur.",
+    icon: ShieldCheck,
+    accent: "from-rose-600 to-rose-500",
+    details: ["Mot de passe", "Session", "Déconnexion"],
+  },
+];
+
 /* ─── Requests ─── */
 const requests = [
   { id: "REQ-2026-001", client: "Ahmed Benali", email: "ahmed.benali@email.ma", type: "App mobile e-commerce", budget: "35 000 MAD", status: "in_progress", priority: "high", date: "2026-06-05" },
@@ -141,7 +196,7 @@ const recentMessages = [
 ];
 
 /* ─── Conversations ─── */
-const conversations = [
+const mockConversations = [
   { id: "CONV-001", user: "Ahmed Benali", subject: "Demande de devis mobile", lastMessage: "Je veux créer une application...", date: "Aujourd'hui", status: "pending", count: 5 },
   { id: "CONV-002", user: "Sara El Amrani", subject: "Services disponibles", lastMessage: "Quels services proposez-vous ?", date: "Hier", status: "resolved", count: 3 },
   { id: "CONV-003", user: "Youssef Karim", subject: "Support technique", lastMessage: "Je veux parler à un conseiller...", date: "2 juin", status: "transferred", count: 8 },
@@ -211,6 +266,38 @@ function ChartTooltip({ active, payload, label }: any) {
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<TabType>("overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [selectedSetting, setSelectedSetting] = useState<string | null>(null);
+  const [settingsMessage, setSettingsMessage] = useState("Les modifications sont sauvegardées dans la base de données.");
+  const [chatbotEnabled, setChatbotEnabled] = useState(true);
+  const [manualResponse, setManualResponse] = useState("");
+  const [settingsData, setSettingsData] = useState<Record<string, unknown>>({});
+  const settingsCount = Object.keys(settingsData).length;
+  const chatbotStatusLabel = chatbotEnabled ? "Actif" : "Désactivé";
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [admins, setAdmins] = useState<Array<{ id: string; name: string; email: string; role: string; isActive: boolean; roleLabel?: string }>>([]);
+  const [conversations, setConversations] = useState<Array<{ id: string; visitorId?: string | null; status?: string; handoff?: boolean; lastMessage?: string; subject?: string }>>([]);
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [handoffLoading, setHandoffLoading] = useState(false);
+  const [settingDrafts, setSettingDrafts] = useState<Record<string, any>>({
+    profile: { name: "", email: "", password: "" },
+    company: { name: "", email: "", phone: "", address: "", website: "" },
+    devis: { recipientEmail: "", autoReply: true, message: "" },
+    chatbot: { enabled: true, name: "Tema Assistant", welcomeMessage: "Bonjour, comment puis-je vous aider ?", tone: "professionnel" },
+    notifications: { devis: true, contact: true, chatbot: true, dashboard: true },
+    security: { require2FA: false, sessionTimeout: "60", autoLogout: true },
+  });
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [adminError, setAdminError] = useState<string | null>(null);
+  const [adminMessage, setAdminMessage] = useState<string | null>(null);
+  const [editingAdminId, setEditingAdminId] = useState<string | null>(null);
+  const [adminForm, setAdminForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+    confirmPassword: "",
+    role: "ADMIN" as string,
+    isActive: true,
+  });
 
   const handleNav = (tab: TabType) => {
     setActiveTab(tab);
@@ -225,6 +312,227 @@ export default function AdminDashboard() {
     services: "Services",
     users: "Clients",
     settings: "Paramètres",
+  };
+
+  const loadAdmins = async () => {
+    setAdminLoading(true);
+    setAdminError(null);
+    try {
+      const response = await getAdmins();
+      if (response.success && Array.isArray(response.data)) {
+        setAdmins(response.data);
+      } else {
+        throw new Error(response.message || "Impossible de charger les administrateurs.");
+      }
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : "Impossible de charger les administrateurs.");
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const loadSettings = async () => {
+    setSettingsLoading(true);
+    try {
+      const response = await getSettings();
+      if (response.success && response.data) {
+        const data = response.data as Record<string, unknown>;
+        setSettingsData(data);
+        setSettingDrafts((prev) => ({
+          ...prev,
+          profile: { ...prev.profile, ...(typeof data.profile === "object" && data.profile ? data.profile as Record<string, unknown> : {}) },
+          company: { ...prev.company, ...(typeof data.company === "object" && data.company ? data.company as Record<string, unknown> : {}) },
+          devis: { ...prev.devis, ...(typeof data.devis === "object" && data.devis ? data.devis as Record<string, unknown> : {}) },
+          chatbot: { ...prev.chatbot, ...(typeof data.chatbot === "object" && data.chatbot ? data.chatbot as Record<string, unknown> : {}) },
+          notifications: { ...prev.notifications, ...(typeof data.notifications === "object" && data.notifications ? data.notifications as Record<string, unknown> : {}) },
+          security: { ...prev.security, ...(typeof data.security === "object" && data.security ? data.security as Record<string, unknown> : {}) },
+        }));
+        const chatbotSettings = data.chatbot as { enabled?: boolean } | undefined;
+        setChatbotEnabled(Boolean(chatbotSettings?.enabled));
+      }
+    } catch (error) {
+      setSettingsMessage("Impossible de charger les réglages depuis le backend.");
+    } finally {
+      setSettingsLoading(false);
+    }
+  };
+
+  const loadConversations = async () => {
+    try {
+      const response = await getConversations();
+      if (response.success && Array.isArray(response.data)) {
+        const loaded = response.data as Array<{ id: string; visitorId?: string | null; status?: string; handoff?: boolean; lastMessage?: string; subject?: string }>;
+        setConversations(loaded);
+        if (loaded.length > 0 && !selectedConversationId) {
+          setSelectedConversationId(loaded[0].id);
+        }
+        if (loaded.length === 0) {
+          const created = await sendChatMessage("Bonjour, je souhaite parler à un conseiller.", null, "demo-visitor");
+          if (created.success && created.data?.conversationId) {
+            setConversations([{ id: created.data.conversationId, visitorId: "demo-visitor", status: "active", handoff: false, lastMessage: created.data.reply, subject: "Conversation de test" }]);
+            setSelectedConversationId(created.data.conversationId);
+          }
+        }
+      }
+    } catch (error) {
+      setSettingsMessage("Impossible de charger les conversations du backend.");
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "settings") {
+      loadAdmins();
+      loadSettings();
+      void loadConversations();
+    }
+  }, [activeTab]);
+
+  const resetAdminForm = () => {
+    setEditingAdminId(null);
+    setAdminForm({
+      name: "",
+      email: "",
+      password: "",
+      confirmPassword: "",
+      role: "ADMIN",
+      isActive: true,
+    });
+  };
+
+  const handleAdminSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setAdminError(null);
+    setAdminMessage(null);
+
+    try {
+      if (editingAdminId) {
+        const payload: Record<string, unknown> = {
+          name: adminForm.name,
+          email: adminForm.email,
+          role: adminForm.role,
+          isActive: adminForm.isActive,
+        };
+        if (adminForm.password) {
+          payload.password = adminForm.password;
+        }
+        const response = await updateAdmin(editingAdminId, payload);
+        if (!response.success) {
+          throw new Error(response.message || "La mise à jour a échoué.");
+        }
+        setAdminMessage("Administrateur mis à jour avec succès.");
+      } else {
+        if (!adminForm.password || !adminForm.confirmPassword) {
+          throw new Error("Le mot de passe et sa confirmation sont obligatoires.");
+        }
+        const response = await createAdmin({
+          name: adminForm.name,
+          email: adminForm.email,
+          password: adminForm.password,
+          confirmPassword: adminForm.confirmPassword,
+          role: adminForm.role,
+          isActive: adminForm.isActive,
+        });
+        if (!response.success) {
+          throw new Error(response.message || "L’ajout a échoué.");
+        }
+        setAdminMessage("Administrateur ajouté avec succès.");
+      }
+      resetAdminForm();
+      await loadAdmins();
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : "Une erreur est survenue.");
+    }
+  };
+
+  const handleEditAdmin = (admin: { id: string; name: string; email: string; role: string; isActive: boolean }) => {
+    setEditingAdminId(admin.id);
+    setAdminForm({
+      name: admin.name,
+      email: admin.email,
+      password: "",
+      confirmPassword: "",
+      role: admin.role,
+      isActive: admin.isActive,
+    });
+    setAdminMessage(null);
+    setAdminError(null);
+  };
+
+  const handleDeleteAdmin = async (adminId: string) => {
+    if (!window.confirm("Supprimer cet administrateur ?")) return;
+    setAdminError(null);
+    setAdminMessage(null);
+    try {
+      const response = await deleteAdmin(adminId);
+      if (!response.success) {
+        throw new Error(response.message || "La suppression a échoué.");
+      }
+      setAdminMessage("Administrateur supprimé.");
+      await loadAdmins();
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : "Une erreur est survenue.");
+    }
+  };
+
+  const handleSettingSave = async (key: string, value: unknown) => {
+    try {
+      const response = await updateSetting(key, value);
+      if (!response.success) {
+        throw new Error(response.message || "La sauvegarde a échoué.");
+      }
+      setSettingsData((prev) => ({ ...prev, [key]: value }));
+      setSettingsMessage(`Réglage “${key}” enregistré.`);
+      await loadSettings();
+    } catch (error) {
+      setSettingsMessage(error instanceof Error ? error.message : "Erreur pendant la sauvegarde.");
+    }
+  };
+
+  const saveCurrentSetting = async () => {
+    if (!selectedSetting) {
+      setSettingsMessage("Sélectionnez d’abord une section à enregistrer.");
+      return;
+    }
+
+    const keyMap: Record<string, string> = {
+      "Profil administrateur": "profile",
+      "Informations de l’entreprise": "company",
+      "Demandes de devis": "devis",
+      "Chatbot IA": "chatbot",
+      "Notifications": "notifications",
+      "Sécurité": "security",
+    };
+
+    const key = keyMap[selectedSetting];
+    if (!key) {
+      setSettingsMessage("Section non prise en charge.");
+      return;
+    }
+
+    await handleSettingSave(key, settingDrafts[key]);
+  };
+
+  const handleHandoff = async (conversationId?: string) => {
+    const targetConversationId = conversationId || selectedConversationId;
+    if (!targetConversationId) {
+      setSettingsMessage("Aucune conversation n’est disponible pour le transfert.");
+      return;
+    }
+
+    setHandoffLoading(true);
+    try {
+      const response = await handoffConversation(targetConversationId, manualResponse || "Un conseiller humain prend en charge cette conversation.");
+      if (!response.success) {
+        throw new Error(response.message || "Échec du transfert.");
+      }
+      setConversations((prev) => prev.map((conversation) => conversation.id === targetConversationId ? { ...conversation, status: "transferred", handoff: true } : conversation));
+      setSettingsMessage("Conversation transférée vers l’équipe humaine.");
+      setManualResponse("");
+    } catch (error) {
+      setSettingsMessage(error instanceof Error ? error.message : "Erreur lors du transfert.");
+    } finally {
+      setHandoffLoading(false);
+    }
   };
 
   return (
@@ -461,7 +769,7 @@ export default function AdminDashboard() {
                           <Cell key={i} fill={entry.color} />
                         ))}
                       </Pie>
-                      <Tooltip formatter={(v: number, name: string) => [`${v} demandes`, name]} />
+                      <Tooltip />
                     </PieChart>
                   </ResponsiveContainer>
                   <div className="mt-3 space-y-2">
@@ -787,7 +1095,7 @@ export default function AdminDashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
-                    {conversations.map((conv) => (
+                    {mockConversations.map((conv) => (
                       <tr key={conv.id} className="hover:bg-slate-50/60 transition-colors">
                         <td className="px-6 py-4 text-sm font-medium text-slate-900">{conv.user}</td>
                         <td className="px-6 py-4 text-sm text-slate-700">{conv.subject}</td>
@@ -948,12 +1256,329 @@ export default function AdminDashboard() {
 
           {/* ════════ SETTINGS TAB ════════ */}
           {activeTab === "settings" && (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 text-center">
-              <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <Settings className="w-8 h-8 text-slate-400" />
+            <div className="space-y-6">
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 md:p-8">
+                <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+                  <div>
+                    <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 mb-3">
+                      <Settings className="w-3.5 h-3.5" />
+                      Paramètres
+                    </div>
+                    <h3 className="text-2xl font-semibold text-slate-900">Paramètres</h3>
+                    <p className="text-sm text-slate-500 mt-2">Gérez la configuration générale de la plateforme Tema Concept.</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      void saveCurrentSetting();
+                    }}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700 transition-colors"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    Enregistrer les changements
+                  </button>
+                </div>
               </div>
-              <h3 className="text-base font-semibold text-slate-900 mb-2">Paramètres</h3>
-              <p className="text-sm text-slate-500">La section paramètres sera disponible prochainement.</p>
+
+              <div className="rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm text-blue-700">
+                {settingsMessage}
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-2">
+                {settingsSections.map(({ title, description, icon: Icon, accent, details }) => (
+                  <div key={title} className="bg-white rounded-3xl border border-slate-100 shadow-sm p-5 hover:shadow-md transition-all">
+                    <div className={`inline-flex rounded-2xl bg-gradient-to-br ${accent} p-3 text-white shadow-sm`}>
+                      <Icon className="w-5 h-5" />
+                    </div>
+                    <div className="mt-4">
+                      <h4 className="text-base font-semibold text-slate-900">{title}</h4>
+                      <p className="text-sm text-slate-500 mt-1">{description}</p>
+                    </div>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {details.map((detail) => (
+                        <span key={detail} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+                          {detail}
+                        </span>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => setSelectedSetting(selectedSetting === title ? null : title)}
+                      className="mt-5 inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3.5 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+                    >
+                      {selectedSetting === title ? "Masquer" : "Configurer"}
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {selectedSetting && (
+                <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">Section active</p>
+                      <p className="text-sm text-slate-500">{selectedSetting}</p>
+                    </div>
+                    <button
+                      onClick={() => setSelectedSetting(null)}
+                      className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+                    >
+                      Fermer
+                    </button>
+                  </div>
+
+                  {settingsLoading ? (
+                    <p className="mt-4 text-sm text-slate-500">Chargement des réglages…</p>
+                  ) : (
+                    <div className="mt-5 space-y-4">
+                      {selectedSetting === "Profil administrateur" && (
+                        <>
+                          <input value={settingDrafts.profile.name} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, profile: { ...prev.profile, name: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Nom de l’administrateur" />
+                          <input value={settingDrafts.profile.email} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, profile: { ...prev.profile, email: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Email de contact" />
+                          <input type="password" value={settingDrafts.profile.password} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, profile: { ...prev.profile, password: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Nouveau mot de passe" />
+                        </>
+                      )}
+                      {selectedSetting === "Informations de l’entreprise" && (
+                        <>
+                          <input value={settingDrafts.company.name} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, company: { ...prev.company, name: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Nom de l’entreprise" />
+                          <input value={settingDrafts.company.email} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, company: { ...prev.company, email: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Email de l’entreprise" />
+                          <input value={settingDrafts.company.phone} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, company: { ...prev.company, phone: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Téléphone" />
+                          <input value={settingDrafts.company.address} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, company: { ...prev.company, address: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Adresse" />
+                          <input value={settingDrafts.company.website} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, company: { ...prev.company, website: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Site web" />
+                        </>
+                      )}
+                      {selectedSetting === "Demandes de devis" && (
+                        <>
+                          <input value={settingDrafts.devis.recipientEmail} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, devis: { ...prev.devis, recipientEmail: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Email destinataire" />
+                          <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={Boolean(settingDrafts.devis.autoReply)} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, devis: { ...prev.devis, autoReply: event.target.checked } }))} /> Réponse automatique</label>
+                          <textarea value={settingDrafts.devis.message} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, devis: { ...prev.devis, message: event.target.value } }))} className="min-h-24 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Message automatique" />
+                        </>
+                      )}
+                      {selectedSetting === "Chatbot IA" && (
+                        <>
+                          <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={Boolean(settingDrafts.chatbot.enabled)} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, chatbot: { ...prev.chatbot, enabled: event.target.checked } }))} /> Activer le chatbot</label>
+                          <input value={settingDrafts.chatbot.name} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, chatbot: { ...prev.chatbot, name: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Nom du chatbot" />
+                          <input value={settingDrafts.chatbot.welcomeMessage} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, chatbot: { ...prev.chatbot, welcomeMessage: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Message d’accueil" />
+                          <select value={settingDrafts.chatbot.tone} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, chatbot: { ...prev.chatbot, tone: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm">
+                            <option value="professionnel">Professionnel</option>
+                            <option value="chaleureux">Chaleureux</option>
+                            <option value="direct">Direct</option>
+                          </select>
+                        </>
+                      )}
+                      {selectedSetting === "Notifications" && (
+                        <>
+                          <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={Boolean(settingDrafts.notifications.devis)} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, notifications: { ...prev.notifications, devis: event.target.checked } }))} /> Notifications de devis</label>
+                          <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={Boolean(settingDrafts.notifications.contact)} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, notifications: { ...prev.notifications, contact: event.target.checked } }))} /> Notifications de contact</label>
+                          <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={Boolean(settingDrafts.notifications.chatbot)} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, notifications: { ...prev.notifications, chatbot: event.target.checked } }))} /> Notifications chatbot</label>
+                          <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={Boolean(settingDrafts.notifications.dashboard)} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, notifications: { ...prev.notifications, dashboard: event.target.checked } }))} /> Notifications tableau de bord</label>
+                        </>
+                      )}
+                      {selectedSetting === "Sécurité" && (
+                        <>
+                          <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={Boolean(settingDrafts.security.require2FA)} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, security: { ...prev.security, require2FA: event.target.checked } }))} /> Activer la 2FA</label>
+                          <input value={settingDrafts.security.sessionTimeout} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, security: { ...prev.security, sessionTimeout: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Délai de session (min)" />
+                          <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={Boolean(settingDrafts.security.autoLogout)} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, security: { ...prev.security, autoLogout: event.target.checked } }))} /> Déconnexion automatique</label>
+                        </>
+                      )}
+                      <button onClick={() => { void saveCurrentSetting(); }} className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700">Enregistrer cette section</button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                  <div>
+                    <h3 className="text-xl font-semibold text-slate-900">Gestion des administrateurs</h3>
+                    <p className="text-sm text-slate-500 mt-2">Ajoutez, modifiez ou supprimez les accès administrateurs directement depuis la plateforme.</p>
+                  </div>
+                </div>
+
+                <div className="mt-6 grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+                  <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-semibold text-slate-900">Liste des administrateurs</h4>
+                      <span className="text-xs text-slate-500">{admins.length} comptes</span>
+                    </div>
+                    {adminLoading ? (
+                      <p className="mt-4 text-sm text-slate-500">Chargement…</p>
+                    ) : (
+                      <div className="mt-4 space-y-3">
+                        {admins.map((admin) => (
+                          <div key={admin.id} className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                            <div>
+                              <p className="text-sm font-semibold text-slate-900">{admin.name}</p>
+                              <p className="text-xs text-slate-500">{admin.email}</p>
+                              <p className="text-[11px] text-slate-400 mt-1">{admin.roleLabel || admin.role}</p>
+                            </div>
+                            <div className="flex gap-2">
+                              <button onClick={() => handleEditAdmin(admin)} className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">Modifier</button>
+                              <button onClick={() => handleDeleteAdmin(admin.id)} className="rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50">Supprimer</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <form onSubmit={handleAdminSubmit} className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-semibold text-slate-900">{editingAdminId ? "Modifier un administrateur" : "Ajouter un administrateur"}</h4>
+                      {editingAdminId && (
+                        <button type="button" onClick={resetAdminForm} className="text-xs font-medium text-slate-500 hover:text-slate-700">Annuler</button>
+                      )}
+                    </div>
+
+                    {adminError && (
+                      <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{adminError}</div>
+                    )}
+                    {adminMessage && (
+                      <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-600">{adminMessage}</div>
+                    )}
+
+                    <div className="mt-4 space-y-3">
+                      <input
+                        value={adminForm.name}
+                        onChange={(event) => setAdminForm((prev) => ({ ...prev, name: event.target.value }))}
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400"
+                        placeholder="Nom complet"
+                        required
+                      />
+                      <input
+                        type="email"
+                        value={adminForm.email}
+                        onChange={(event) => setAdminForm((prev) => ({ ...prev, email: event.target.value }))}
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400"
+                        placeholder="Email"
+                        required
+                      />
+                      <input
+                        type="password"
+                        value={adminForm.password}
+                        onChange={(event) => setAdminForm((prev) => ({ ...prev, password: event.target.value }))}
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400"
+                        placeholder={editingAdminId ? "Nouveau mot de passe (optionnel)" : "Mot de passe"}
+                      />
+                      <input
+                        type="password"
+                        value={adminForm.confirmPassword}
+                        onChange={(event) => setAdminForm((prev) => ({ ...prev, confirmPassword: event.target.value }))}
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400"
+                        placeholder={editingAdminId ? "Confirmation du nouveau mot de passe" : "Confirmer le mot de passe"}
+                      />
+                      <select
+                        value={adminForm.role}
+                        onChange={(event) => setAdminForm((prev) => ({ ...prev, role: event.target.value }))}
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400"
+                      >
+                        <option value="SUPER_ADMIN">Admin principal</option>
+                        <option value="ADMIN">Admin simple</option>
+                        <option value="SUPPORT">Agent support</option>
+                      </select>
+                      <label className="flex items-center gap-2 text-sm text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={adminForm.isActive}
+                          onChange={(event) => setAdminForm((prev) => ({ ...prev, isActive: event.target.checked }))}
+                        />
+                        Compte actif
+                      </label>
+                    </div>
+
+                    <button type="submit" className="mt-4 inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700">
+                      {editingAdminId ? "Mettre à jour" : "Ajouter l’administrateur"}
+                    </button>
+                  </form>
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-blue-100 bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900 p-6 md:p-8 text-white shadow-sm">
+                <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                  <div>
+                    <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-blue-100 mb-3">
+                      <BadgeCheck className="w-3.5 h-3.5" />
+                      Important
+                    </div>
+                    <h3 className="text-xl font-semibold">Gestion des réponses humaines</h3>
+                    <p className="text-sm text-slate-300 mt-2">L’agent peut reprendre une conversation, désactiver le chatbot et répondre manuellement au client.</p>
+                    <p className="mt-2 text-xs text-blue-100">{settingsCount} réglages chargés depuis la base de données · Chatbot {chatbotStatusLabel}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setChatbotEnabled(false)}
+                      className="rounded-xl border border-white/20 bg-white/10 px-3.5 py-2 text-sm font-medium text-white hover:bg-white/20 transition-colors"
+                    >
+                      Désactiver le chatbot
+                    </button>
+                    <button
+                      onClick={() => setChatbotEnabled(true)}
+                      className="rounded-xl bg-blue-500 px-3.5 py-2 text-sm font-medium text-white hover:bg-blue-400 transition-colors"
+                    >
+                      Réactiver le chatbot
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-6 grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+                  <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur-sm">
+                    <div className="mb-3 flex items-center justify-between">
+                      <p className="text-sm font-semibold text-white">Conversations réelles</p>
+                      <select
+                        value={selectedConversationId ?? ""}
+                        onChange={(event) => setSelectedConversationId(event.target.value)}
+                        className="rounded-xl border border-white/10 bg-slate-950/30 px-2.5 py-2 text-xs text-white"
+                      >
+                        {conversations.map((conversation) => (
+                          <option key={conversation.id} value={conversation.id}>{conversation.subject || conversation.id}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-3">
+                      {conversations.length === 0 ? (
+                        <p className="text-sm text-slate-300">Aucune conversation n’est encore disponible. Une conversation de test sera créée automatiquement au chargement.</p>
+                      ) : conversations.map((conversation) => (
+                        <div key={conversation.id} className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-950/20 px-4 py-3">
+                          <div>
+                            <p className="text-sm font-semibold">{conversation.subject || conversation.id}</p>
+                            <p className="text-xs text-slate-300 mt-1">{conversation.lastMessage || "Aucun message"}</p>
+                          </div>
+                          <div className="text-right">
+                            <span className="inline-flex rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-medium text-slate-100">
+                              {conversation.handoff ? "Transférée" : conversation.status === "transferred" ? "Transférée" : "Active"}
+                            </span>
+                            <button onClick={() => { setSelectedConversationId(conversation.id); void handleHandoff(conversation.id); }} className="mt-2 flex items-center gap-1 text-xs font-medium text-blue-200 hover:text-white">
+                              <MessageSquareMore className="w-3.5 h-3.5" />
+                              {handoffLoading ? "Transfert..." : "Transférer"}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-slate-950/20 p-4 backdrop-blur-sm">
+                    <div className="flex items-center gap-2 text-sm font-medium text-blue-100">
+                      <MessageCircle className="w-4 h-4" />
+                      Réponse manuelle
+                    </div>
+                    <textarea
+                      value={manualResponse}
+                      onChange={(event) => setManualResponse(event.target.value)}
+                      className="mt-4 min-h-28 w-full rounded-2xl border border-white/10 bg-white/10 px-3 py-3 text-sm text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                      placeholder="Rédigez la réponse à envoyer au client..."
+                    />
+                    <button
+                      onClick={() => {
+                        void handleHandoff(selectedConversationId ?? undefined);
+                      }}
+                      className="mt-3 inline-flex items-center gap-2 rounded-xl bg-white px-3.5 py-2 text-sm font-medium text-slate-900 hover:bg-slate-100 transition-colors"
+                    >
+                      <Send className="w-4 h-4" />
+                      Envoyer
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 

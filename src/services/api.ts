@@ -40,9 +40,23 @@ interface ConversationFromApi {
   id: string;
   visitorId?: string | null;
   createdAt: string;
+  updatedAt?: string;
+  status?: string;
+  handoff?: boolean;
   messagesCount?: number;
   lastMessage?: string;
   subject?: string;
+}
+
+interface AdminFromApi {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  roleLabel?: string;
 }
 
 export const getToken = (): string | null => localStorage.getItem(TOKEN_KEY);
@@ -82,6 +96,52 @@ export async function loginAdmin(email: string, password: string) {
 
 export async function getMe() {
   const response = await fetch(`${API_URL}/auth/me`, {
+    headers: getAuthHeaders(),
+  });
+  return handleResponse(response);
+}
+
+export async function getAdmins() {
+  const response = await fetch(`${API_URL}/auth/admins`, {
+    headers: getAuthHeaders(),
+  });
+  return handleResponse<AdminFromApi[]>(response);
+}
+
+export async function createAdmin(payload: {
+  name: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+  role?: string;
+  isActive?: boolean;
+}) {
+  const response = await fetch(`${API_URL}/auth/admins`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<AdminFromApi>(response);
+}
+
+export async function updateAdmin(id: string, payload: {
+  name?: string;
+  email?: string;
+  password?: string;
+  role?: string;
+  isActive?: boolean;
+}) {
+  const response = await fetch(`${API_URL}/auth/admins/${id}`, {
+    method: "PUT",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<AdminFromApi>(response);
+}
+
+export async function deleteAdmin(id: string) {
+  const response = await fetch(`${API_URL}/auth/admins/${id}`, {
+    method: "DELETE",
     headers: getAuthHeaders(),
   });
   return handleResponse(response);
@@ -168,6 +228,31 @@ export async function getConversations() {
 
 export async function getConversationById(id: string) {
   const response = await fetch(`${API_URL}/chat/conversations/${id}`);
+  return handleResponse(response);
+}
+
+export async function handoffConversation(id: string, message?: string) {
+  const response = await fetch(`${API_URL}/chat/conversations/${id}/handoff`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ message }),
+  });
+  return handleResponse<{ id: string; handoff: boolean; status: string }>(response);
+}
+
+export async function getSettings() {
+  const response = await fetch(`${API_URL}/settings`, {
+    headers: getAuthHeaders(),
+  });
+  return handleResponse<Record<string, unknown>>(response);
+}
+
+export async function updateSetting(key: string, value: unknown) {
+  const response = await fetch(`${API_URL}/settings/${key}`, {
+    method: "PUT",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ value }),
+  });
   return handleResponse(response);
 }
 

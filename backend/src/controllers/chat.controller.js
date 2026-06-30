@@ -51,7 +51,7 @@ export const sendChatMessage = async (req, res) => {
       }
     } else {
       conversation = await prisma.chatConversation.create({
-        data: { visitorId: visitorId || null },
+        data: { visitorId: visitorId || null, status: "active", handoff: false },
       });
     }
 
@@ -113,6 +113,9 @@ export const getConversations = async (req, res) => {
         id: conv.id,
         visitorId: conv.visitorId,
         createdAt: conv.createdAt,
+        updatedAt: conv.updatedAt,
+        status: conv.status,
+        handoff: conv.handoff,
         messagesCount: conv.messages.length,
         lastMessage: lastMessage?.content || "",
         subject: firstUserMessage

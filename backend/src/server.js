@@ -6,6 +6,7 @@ import devisRoutes from "./routes/devis.routes.js";
 import contactRoutes from "./routes/contact.routes.js";
 import serviceRoutes from "./routes/service.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
+import settingsRoutes from "./routes/settings.routes.js";
 import prisma from "./config/prisma.js";
 
 const app = express();
@@ -37,6 +38,7 @@ app.use("/api/devis", devisRoutes);
 app.use("/api/contact", contactRoutes);
 app.use("/api/services", serviceRoutes);
 app.use("/api/chat", chatRoutes);
+app.use("/api/settings", settingsRoutes);
 
 app.use((req, res) => {
   res.status(404).json({

@@ -7,12 +7,21 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum AdminRole {
+  SUPER_ADMIN
+  ADMIN
+  SUPPORT
+}
+
 model Admin {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   name      String
-  email     String   @unique
+  email     String    @unique
   password  String
-  createdAt DateTime @default(now())
+  role      AdminRole @default(ADMIN)
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 }
 
 model Service {
@@ -64,6 +73,9 @@ model ChatConversation {
   id        String        @id @default(cuid())
   visitorId String?
   createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  status    String        @default("active")
+  handoff   Boolean       @default(false)
   messages  ChatMessage[]
 }
 
@@ -79,4 +91,13 @@ model ChatMessage {
   sender         MessageSender
   content        String
   createdAt      DateTime         @default(now())
+}
+
+model PlatformSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  category  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
