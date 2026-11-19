@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { LogIn, Menu, X, Bot } from "lucide-react";
+import TemaLogo from "./TemaLogo";
+import ThemeToggle from "./ThemeToggle";
 
 const navItems = [
   { label: "Accueil", sectionId: "accueil" },
@@ -66,41 +68,53 @@ export default function Header() {
   };
 
   return (
-    <header className="bg-white border-b border-gray-200 sticky top-0 z-40">
+    <header className="sticky top-0 z-40 border-b border-border bg-card">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
-          <a
-            href="/"
-            onClick={(e) => { e.preventDefault(); if (location.pathname === "/") scrollToSection("accueil"); else navigate("/"); }}
-            className="flex items-center gap-2"
-          >
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-sm">TC</span>
-            </div>
-            <span className="text-xl font-semibold text-gray-900">Tema Concept</span>
-          </a>
+          <TemaLogo
+            variant="header"
+            asLink
+            to="/"
+            onClick={(e) => {
+              e.preventDefault();
+              if (location.pathname === "/") scrollToSection("accueil");
+              else navigate("/");
+            }}
+          />
 
-          <nav className="hidden md:flex items-center gap-6">
-            {navItems.map((item) => (
+          <nav className="hidden md:flex items-center gap-4">
+            {navItems.slice(0, 1).map((item) => (
               <SectionNavLink
                 key={item.sectionId}
                 label={item.label}
                 sectionId={item.sectionId}
-                className="text-gray-700 hover:text-blue-600 transition-colors text-sm cursor-pointer"
+                className="text-sm text-muted-foreground hover:text-primary transition-colors cursor-pointer"
               />
             ))}
             <a
               href="/chatbot"
               onClick={handleAssistanceClick}
-              className="flex items-center gap-1.5 text-gray-700 hover:text-blue-600 transition-colors text-sm cursor-pointer"
+              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors cursor-pointer"
             >
               <Bot className="w-4 h-4" />
               Assistance IA
+              <span className="rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">
+                Nouveau
+              </span>
             </a>
+            {navItems.slice(1).map((item) => (
+              <SectionNavLink
+                key={item.sectionId}
+                label={item.label}
+                sectionId={item.sectionId}
+                className="text-sm text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+              />
+            ))}
+            <ThemeToggle />
             <a
               href="/#demander-devis"
               onClick={handleDevisClick}
-              className="px-4 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium hover:bg-blue-100 transition-colors border border-blue-200 cursor-pointer"
+              className="px-4 py-2 bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 rounded-lg text-sm font-medium hover:bg-blue-100 dark:hover:bg-blue-950 transition-colors border border-blue-200 dark:border-blue-800 cursor-pointer"
             >
               Demander un devis
             </a>
@@ -113,35 +127,50 @@ export default function Header() {
             </Link>
           </nav>
 
-          <button className="md:hidden p-2 text-gray-700" onClick={() => setMobileOpen(!mobileOpen)}>
-            {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-          </button>
+          <div className="flex items-center gap-1 md:hidden">
+            <ThemeToggle />
+            <button className="p-2 text-muted-foreground" onClick={() => setMobileOpen(!mobileOpen)}>
+              {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+            </button>
+          </div>
         </div>
       </div>
 
       {mobileOpen && (
-        <div className="md:hidden bg-white border-t border-gray-100 px-4 py-4 space-y-1">
-          {navItems.map((item) => (
+        <div className="md:hidden border-t border-border bg-card px-4 py-4 space-y-1">
+          {navItems.slice(0, 1).map((item) => (
             <SectionNavLink
               key={item.sectionId}
               label={item.label}
               sectionId={item.sectionId}
               onClick={() => setMobileOpen(false)}
-              className="block text-gray-700 hover:text-blue-600 text-sm py-2 cursor-pointer"
+              className="block text-muted-foreground hover:text-primary text-sm py-2 cursor-pointer"
             />
           ))}
           <a
             href="/chatbot"
             onClick={handleAssistanceClick}
-            className="flex items-center gap-1.5 text-gray-700 hover:text-blue-600 text-sm py-2 cursor-pointer"
+            className="flex items-center gap-1.5 text-muted-foreground hover:text-primary text-sm py-2 cursor-pointer"
           >
             <Bot className="w-4 h-4" />
             Assistance IA
+            <span className="rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">
+              Nouveau
+            </span>
           </a>
+          {navItems.slice(1).map((item) => (
+            <SectionNavLink
+              key={item.sectionId}
+              label={item.label}
+              sectionId={item.sectionId}
+              onClick={() => setMobileOpen(false)}
+              className="block text-muted-foreground hover:text-primary text-sm py-2 cursor-pointer"
+            />
+          ))}
           <a
             href="/#demander-devis"
             onClick={handleDevisClick}
-            className="block w-full text-center px-4 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium border border-blue-200 cursor-pointer"
+            className="block w-full text-center px-4 py-2 bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 rounded-lg text-sm font-medium border border-blue-200 dark:border-blue-800 cursor-pointer"
           >
             Demander un devis
           </a>

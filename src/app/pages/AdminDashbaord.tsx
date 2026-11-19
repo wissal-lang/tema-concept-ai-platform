@@ -1,12 +1,14 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import {
+  ArrowLeft,
   LayoutDashboard,
   FileText,
   Mail,
   Bot,
   Briefcase,
   Users,
+  User,
   Settings,
   LogOut,
   Bell,
@@ -18,94 +20,109 @@ import {
   Send,
   Download,
   UserPlus,
-  TrendingDown,
+  Calendar,
+  DollarSign,
+  CheckCircle,
+  AlertCircle,
   Clock,
   MoreVertical,
   Phone,
-  ArrowUpRight,
   MessageCircle,
   ChevronRight,
-  Zap,
-  ShieldCheck,
-  SlidersHorizontal,
-  Sparkles,
-  MessageSquareMore,
-  BadgeCheck,
 } from "lucide-react";
 import {
-  AreaChart,
-  Area,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
-  CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
 } from "recharts";
 import StatusBadge from "../components/StatusBadge";
-import { createAdmin, deleteAdmin, getAdmins, getConversations, getSettings, handoffConversation, sendChatMessage, updateAdmin, updateSetting } from "../../services/api";
+import TemaLogo from "../components/TemaLogo";
+import ThemeToggle from "../components/ThemeToggle";
+import AdminSettingsPanel, { type SettingsSectionId } from "../components/admin/AdminSettingsPanel";
+import { createAdmin, deleteAdmin, getAdmins, getContactList, getConversationById, getConversations, getDevisList, getSettings, handoffConversation, updateAdmin, updateContactStatus, updateDevisStatus, updateSetting } from "../../services/api";
 
 type TabType = "overview" | "requests" | "messages" | "conversations" | "services" | "users" | "settings";
 
+type DevisActivityItem = {
+  id: string;
+  fullName: string;
+  email: string;
+  phone?: string | null;
+  projectType: string;
+  budget?: string | null;
+  description?: string;
+  status: string;
+  createdAt: string;
+  updatedAt?: string;
+};
+
+type ContactActivityItem = {
+  id: string;
+  fullName: string;
+  email: string;
+  subject?: string | null;
+  message: string;
+  status?: string;
+  createdAt: string;
+};
+
+type ConversationActivityItem = {
+  id: string;
+  visitorId?: string | null;
+  clientId?: string | null;
+  clientName?: string | null;
+  clientEmail?: string | null;
+  status?: string;
+  handoff?: boolean;
+  lastMessage?: string;
+  subject?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+type ConversationRow = {
+  id: string;
+  user: string;
+  subject: string;
+  lastMessage: string;
+  date: string;
+  status: string;
+  count?: number;
+};
+
+type ConversationMessage = {
+  id: string;
+  sender: string;
+  content: string;
+  createdAt: string;
+};
+
 /* ─── Nav items ─── */
-const navItems: { id: TabType; label: string; icon: React.ElementType; badge?: number }[] = [
-  { id: "overview", label: "Dashboard", icon: LayoutDashboard },
-  { id: "requests", label: "Demandes de devis", icon: FileText, badge: 18 },
-  { id: "messages", label: "Messages contact", icon: Mail, badge: 7 },
-  { id: "conversations", label: "Conversations IA", icon: Bot },
-  { id: "services", label: "Services", icon: Briefcase },
-  { id: "users", label: "Clients", icon: Users },
+const navItems: { id: TabType; label: string; icon: React.ElementType; badge?: number; group: string }[] = [
+  { id: "overview", label: "Dashboard", icon: LayoutDashboard, group: "Principal" },
+  { id: "requests", label: "Demandes de devis", icon: FileText, group: "Principal" },
+  { id: "messages", label: "Messages contact", icon: Mail, group: "Principal" },
+  { id: "conversations", label: "Conversations IA", icon: Bot, group: "Principal" },
+  { id: "services", label: "Services", icon: Briefcase, group: "Gestion" },
+  { id: "users", label: "Clients", icon: Users, group: "Gestion" },
 ];
 
-/* ─── Stats ─── */
-const statCards = [
-  {
-    label: "Total demandes de devis",
-    value: "124",
-    change: "+12%",
-    up: true,
-    icon: FileText,
-    iconColor: "text-blue-600",
-    iconBg: "bg-blue-50",
-    barColor: "bg-blue-500",
-    barWidth: "75%",
-  },
-  {
-    label: "Nouvelles demandes",
-    value: "18",
-    change: "+5 aujourd'hui",
-    up: true,
-    icon: Clock,
-    iconColor: "text-orange-500",
-    iconBg: "bg-orange-50",
-    barColor: "bg-orange-400",
-    barWidth: "25%",
-  },
-  {
-    label: "Messages non lus",
-    value: "7",
-    change: "+2 nouveaux",
-    up: true,
-    icon: Mail,
-    iconColor: "text-violet-600",
-    iconBg: "bg-violet-50",
-    barColor: "bg-violet-500",
-    barWidth: "15%",
-  },
-  {
-    label: "Conversations IA",
-    value: "256",
-    change: "+23% ce mois",
-    up: true,
-    icon: Bot,
-    iconColor: "text-emerald-600",
-    iconBg: "bg-emerald-50",
-    barColor: "bg-emerald-500",
-    barWidth: "90%",
-  },
-];
+const navGroups = ["Principal", "Gestion"];
+
+/* ─── UI tokens (style only) ─── */
+const ui = {
+  card: "bg-white dark:bg-card rounded-2xl shadow-[0_1px_2px_rgba(15,23,42,0.04),0_4px_16px_rgba(15,23,42,0.03)] dark:shadow-none dark:border dark:border-border",
+  cardHover: "transition-all duration-200 hover:shadow-[0_2px_8px_rgba(15,23,42,0.06)] dark:hover:shadow-none hover:-translate-y-px",
+  input: "rounded-lg border border-[#E2E8F0] dark:border-border bg-white dark:bg-input/30 px-3.5 py-2.5 text-sm text-[#0F172A] dark:text-foreground placeholder:text-[#64748B] dark:placeholder:text-muted-foreground outline-none transition-all duration-200 focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/15",
+  btnPrimary: "inline-flex items-center justify-center gap-2 rounded-lg bg-[#2563EB] px-4 py-2.5 text-sm font-medium text-white transition-all duration-200 hover:bg-[#1D4ED8] active:scale-[0.98]",
+  btnSecondary: "inline-flex items-center justify-center gap-2 rounded-lg border border-[#E2E8F0] dark:border-border bg-white dark:bg-card px-4 py-2.5 text-sm font-medium text-[#0F172A] dark:text-foreground transition-all duration-200 hover:bg-[#F1F5F9] dark:hover:bg-accent active:scale-[0.98]",
+  btnGhost: "inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-[#64748B] dark:text-muted-foreground transition-all duration-200 hover:bg-[#F1F5F9] dark:hover:bg-accent hover:text-[#0F172A] dark:hover:text-foreground active:scale-[0.98]",
+  tableHead: "sticky top-0 z-10 bg-[#F8FAFC]/95 dark:bg-muted/95 backdrop-blur-sm px-6 py-4 text-left text-xs font-medium text-[#64748B] dark:text-muted-foreground",
+  tableRow: "border-b border-[#F1F5F9] dark:border-border transition-colors duration-150 hover:bg-[#F8FAFC] dark:hover:bg-muted/50",
+};
 
 /* ─── Charts ─── */
 const monthlyData = [
@@ -117,92 +134,126 @@ const monthlyData = [
   { month: "Jun", demandes: 24, conversations: 61 },
 ];
 
-const serviceDistribution = [
-  { name: "Dév. Web", value: 54, color: "#2563EB" },
-  { name: "Apps Mobiles", value: 43, color: "#7C3AED" },
-  { name: "Consulting IT", value: 31, color: "#059669" },
-  { name: "Infrastructure", value: 28, color: "#F59E0B" },
-];
-
-const settingsSections = [
-  {
-    title: "Profil administrateur",
-    description: "Gérez votre identité, votre email et votre mot de passe.",
-    icon: UserPlus,
-    accent: "from-blue-600 to-blue-500",
-    details: ["Nom", "Email", "Mot de passe", "Avatar"],
-  },
-  {
-    title: "Informations de l’entreprise",
-    description: "Personnalisez les informations visibles sur votre plateforme.",
-    icon: Briefcase,
-    accent: "from-slate-700 to-slate-600",
-    details: ["Nom", "Logo", "Email", "Téléphone", "Adresse", "Réseaux"],
-  },
-  {
-    title: "Gestion des services",
-    description: "Ajoutez, modifiez et organisez vos offres de services.",
-    icon: SlidersHorizontal,
-    accent: "from-emerald-600 to-emerald-500",
-    details: ["Ajouter", "Modifier", "Activer", "Ordre d’affichage"],
-  },
-  {
-    title: "Demandes de devis",
-    description: "Définissez les notifications et l’email de réception.",
-    icon: FileText,
-    accent: "from-violet-600 to-violet-500",
-    details: ["Email", "Statut", "Notifications", "Message auto"],
-  },
-  {
-    title: "Chatbot IA",
-    description: "Contrôlez le comportement et le ton de votre assistant IA.",
-    icon: Bot,
-    accent: "from-cyan-600 to-cyan-500",
-    details: ["Activer", "Nom", "Accueil", "Ton", "FAQ"],
-  },
-  {
-    title: "Notifications",
-    description: "Choisissez les alertes à recevoir par email et dashboard.",
-    icon: Bell,
-    accent: "from-amber-500 to-orange-500",
-    details: ["Devis", "Contact", "Chatbot", "Dashboard"],
-  },
-  {
-    title: "Sécurité",
-    description: "Renforcez la protection de votre espace administrateur.",
-    icon: ShieldCheck,
-    accent: "from-rose-600 to-rose-500",
-    details: ["Mot de passe", "Session", "Déconnexion"],
-  },
-];
-
 /* ─── Requests ─── */
-const requests = [
-  { id: "REQ-2026-001", client: "Ahmed Benali", email: "ahmed.benali@email.ma", type: "App mobile e-commerce", budget: "35 000 MAD", status: "in_progress", priority: "high", date: "2026-06-05" },
-  { id: "REQ-2026-002", client: "Sara El Amrani", email: "sara.amrani@email.ma", type: "Site web vitrine", budget: "12 000 MAD", status: "waiting", priority: "medium", date: "2026-06-03" },
-  { id: "REQ-2026-003", client: "Youssef Karim", email: "youssef.karim@email.ma", type: "Infrastructure cloud", budget: "28 000 MAD", status: "new", priority: "high", date: "2026-05-28" },
-  { id: "REQ-2026-004", client: "Imane Alaoui", email: "imane.alaoui@email.ma", type: "Chatbot IA personnalisé", budget: "18 500 MAD", status: "quote_sent", priority: "medium", date: "2026-05-25" },
-  { id: "REQ-2026-005", client: "Hassan Tazi", email: "hassan.tazi@email.ma", type: "Développement Web", budget: "9 000 MAD", status: "completed", priority: "low", date: "2026-05-20" },
-  { id: "REQ-2026-006", client: "Fatima Zahra", email: "fatima.z@email.ma", type: "Applications Mobiles", budget: "22 000 MAD", status: "closed", priority: "medium", date: "2026-05-15" },
-];
+type AdminRequest = {
+  id: string;
+  client: string;
+  email: string;
+  type: string;
+  budget: string;
+  status: string;
+  priority: string;
+  date: string;
+  phone?: string | null;
+  description?: string;
+};
 
-/* ─── Messages ─── */
-const recentMessages = [
-  { from: "Ahmed Benali", subject: "Question sur les délais de livraison", date: "Il y a 5 min", read: false, initials: "AB" },
-  { from: "Sara El Amrani", subject: "Demande de rappel téléphonique", date: "Il y a 1h", read: false, initials: "SE" },
-  { from: "Youssef Karim", subject: "Confirmation de rendez-vous", date: "Il y a 3h", read: true, initials: "YK" },
-  { from: "Imane Alaoui", subject: "Retour sur le devis envoyé", date: "Hier", read: true, initials: "IA" },
-  { from: "Hassan Tazi", subject: "Satisfaction — site livré avec succès", date: "Hier", read: true, initials: "HT" },
-];
+const requestStatusLabels: Record<string, string> = {
+  new: "Nouvelle",
+  in_progress: "En cours",
+  waiting: "En attente",
+  quote_sent: "Devis envoyé",
+  completed: "Traitée",
+  closed: "Clôturée",
+};
+
+const requestPriorityLabels: Record<string, string> = {
+  high: "Haute",
+  medium: "Moyenne",
+  low: "Basse",
+};
+
+const normalizeDevisStatus = (status?: string) => {
+  const map: Record<string, string> = {
+    NOUVELLE: "new",
+    EN_COURS: "in_progress",
+    DEVIS_ENVOYE: "quote_sent",
+    CLOTUREE: "closed",
+  };
+
+  return status ? map[status] ?? status : "new";
+};
+
+const toBackendDevisStatus = (status: string) => {
+  const map: Record<string, string> = {
+    new: "NOUVELLE",
+    in_progress: "EN_COURS",
+    waiting: "EN_COURS",
+    quote_sent: "DEVIS_ENVOYE",
+    completed: "CLOTUREE",
+    closed: "CLOTUREE",
+  };
+
+  return map[status] ?? "NOUVELLE";
+};
+
+const parseBudgetAmount = (budget: string) => {
+  const amounts = budget
+    .match(/\d[\d\s]*/g)
+    ?.map((amount) => Number(amount.replace(/\s/g, "")))
+    .filter((amount) => Number.isFinite(amount)) ?? [];
+
+  return amounts.length > 0 ? Math.max(...amounts) : 0;
+};
+
+const calculateRequestPriority = (request: AdminRequest) => {
+  const budgetAmount = parseBudgetAmount(request.budget);
+  const projectType = request.type.toLowerCase();
+  let score = 0;
+
+  if (budgetAmount >= 30000) score += 3;
+  else if (budgetAmount >= 18000) score += 2;
+  else if (budgetAmount >= 10000) score += 1;
+
+  if (/(mobile|application|infrastructure|cloud|ia|chatbot|e-commerce)/.test(projectType)) {
+    score += 2;
+  } else if (/(web|site|développement)/.test(projectType)) {
+    score += 1;
+  }
+
+  if (request.status === "new" || request.status === "in_progress") score += 1;
+  if (request.status === "completed" || request.status === "closed") score -= 1;
+
+  if (score >= 5) return "high";
+  if (score >= 3) return "medium";
+  return "low";
+};
+
+const escapeCsvValue = (value: unknown) => {
+  const text = String(value ?? "");
+  return `"${text.replace(/"/g, '""')}"`;
+};
+
+const exportRequestsToCsv = (requestsToExport: AdminRequest[]) => {
+  const headers = ["ID", "Client", "Email", "Type de projet", "Budget", "Statut", "Priorité", "Date"];
+  const rows = requestsToExport.map((request) => [
+    request.id,
+    request.client,
+    request.email,
+    request.type,
+    request.budget,
+    requestStatusLabels[request.status] ?? request.status,
+    requestPriorityLabels[request.priority] ?? request.priority,
+    new Date(request.date).toLocaleDateString("fr-FR"),
+  ]);
+
+  const csv = [headers, ...rows]
+    .map((row) => row.map(escapeCsvValue).join(";"))
+    .join("\n");
+  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const date = new Date().toISOString().slice(0, 10);
+
+  link.href = url;
+  link.download = `demandes-de-devis-${date}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};
 
 /* ─── Conversations ─── */
-const mockConversations = [
-  { id: "CONV-001", user: "Ahmed Benali", subject: "Demande de devis mobile", lastMessage: "Je veux créer une application...", date: "Aujourd'hui", status: "pending", count: 5 },
-  { id: "CONV-002", user: "Sara El Amrani", subject: "Services disponibles", lastMessage: "Quels services proposez-vous ?", date: "Hier", status: "resolved", count: 3 },
-  { id: "CONV-003", user: "Youssef Karim", subject: "Support technique", lastMessage: "Je veux parler à un conseiller...", date: "2 juin", status: "transferred", count: 8 },
-  { id: "CONV-004", user: "Imane Alaoui", subject: "Informations sur les tarifs", lastMessage: "Quel est le coût moyen d'un site web ?", date: "1 juin", status: "resolved", count: 4 },
-  { id: "CONV-005", user: "Hassan Tazi", subject: "Délai de réalisation", lastMessage: "Combien de temps pour un projet mobile ?", date: "31 mai", status: "active", count: 6 },
-];
 
 /* ─── Services ─── */
 const services = [
@@ -213,7 +264,30 @@ const services = [
 ];
 
 /* ─── Users ─── */
-const users = [
+type ClientUser = {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  company: string;
+  status: "active" | "inactive";
+  joined: string;
+  requests: number;
+  initials: string;
+};
+
+const getClientInitials = (name: string) => {
+  const initials = name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+
+  return initials || "CL";
+};
+
+const initialUsers: ClientUser[] = [
   { id: "USR-001", name: "Ahmed Benali", email: "ahmed.benali@email.ma", phone: "+212 6 12 34 56 78", company: "StartupTech SARL", status: "active", joined: "2025-12-15", requests: 5, initials: "AB" },
   { id: "USR-002", name: "Sara El Amrani", email: "sara.amrani@email.ma", phone: "+212 6 23 45 67 89", company: "InnovaTech", status: "active", joined: "2026-01-10", requests: 3, initials: "SE" },
   { id: "USR-003", name: "Youssef Karim", email: "youssef.karim@email.ma", phone: "+212 6 34 56 78 90", company: "Digital Solutions", status: "active", joined: "2026-02-20", requests: 7, initials: "YK" },
@@ -223,13 +297,13 @@ const users = [
 /* ─── Priority badge ─── */
 function PriorityBadge({ priority }: { priority: string }) {
   const map: Record<string, string> = {
-    high: "bg-red-50 text-red-600 border border-red-100",
-    medium: "bg-amber-50 text-amber-600 border border-amber-100",
-    low: "bg-slate-100 text-slate-500",
+    high: "bg-red-50 text-[#EF4444]",
+    medium: "bg-amber-50 text-[#F59E0B]",
+    low: "bg-slate-100 text-[#64748B]",
   };
   const label: Record<string, string> = { high: "Haute", medium: "Moyenne", low: "Basse" };
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${map[priority] ?? map.low}`}>
+    <span className={`inline-flex items-center rounded-md px-2.5 py-1 text-xs font-medium ${map[priority] ?? map.low}`}>
       {label[priority] ?? "—"}
     </span>
   );
@@ -238,21 +312,22 @@ function PriorityBadge({ priority }: { priority: string }) {
 /* ─── Conv status badge ─── */
 function ConvBadge({ status }: { status: string }) {
   const map: Record<string, { cls: string; label: string }> = {
-    active: { cls: "bg-emerald-50 text-emerald-700 border border-emerald-100", label: "Active" },
-    pending: { cls: "bg-amber-50 text-amber-700 border border-amber-100", label: "À revoir" },
-    transferred: { cls: "bg-blue-50 text-blue-700 border border-blue-100", label: "Transférée" },
-    resolved: { cls: "bg-slate-100 text-slate-600", label: "Résolue" },
+    active: { cls: "bg-green-50 text-[#22C55E]", label: "Active" },
+    pending: { cls: "bg-amber-50 text-[#F59E0B]", label: "À revoir" },
+    needs_support: { cls: "bg-amber-50 text-[#F59E0B]", label: "Support requis" },
+    transferred: { cls: "bg-blue-50 text-[#2563EB]", label: "Transférée" },
+    resolved: { cls: "bg-slate-100 text-[#64748B]", label: "Résolue" },
   };
   const c = map[status] ?? map.resolved;
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${c.cls}`}>{c.label}</span>;
+  return <span className={`inline-flex items-center rounded-md px-2.5 py-1 text-xs font-medium ${c.cls}`}>{c.label}</span>;
 }
 
 /* ─── Custom Tooltip for charts ─── */
 function ChartTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-white border border-slate-100 shadow-lg rounded-lg px-3 py-2 text-xs">
-      <p className="font-medium text-slate-700 mb-1">{label}</p>
+    <div className="rounded-lg border border-[#E2E8F0] bg-white px-3.5 py-2.5 text-xs shadow-[0_4px_16px_rgba(15,23,42,0.08)]">
+      <p className="mb-1.5 font-medium text-[#0F172A]">{label}</p>
       {payload.map((p: any, i: number) => (
         <p key={i} style={{ color: p.color }} className="font-medium">
           {p.name}: <span className="font-semibold">{p.value}</span>
@@ -262,24 +337,78 @@ function ChartTooltip({ active, payload, label }: any) {
   );
 }
 
+const toDate = (value?: string | Date | null) => {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const formatRelativeTime = (value?: string | Date | null) => {
+  const date = toDate(value);
+  if (!date) return "Date inconnue";
+
+  const diffMs = Date.now() - date.getTime();
+  const diffMinutes = Math.max(0, Math.floor(diffMs / 60000));
+
+  if (diffMinutes < 1) return "À l'instant";
+  if (diffMinutes < 60) return `Il y a ${diffMinutes} min`;
+
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `Il y a ${diffHours}h`;
+
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays === 1) return "Hier";
+  if (diffDays < 7) return `Il y a ${diffDays} jours`;
+
+  return date.toLocaleDateString("fr-FR");
+};
+
 /* ═══════════════════════════════════════════════════════ */
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<TabType>("overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [selectedSetting, setSelectedSetting] = useState<string | null>(null);
-  const [settingsMessage, setSettingsMessage] = useState("Les modifications sont sauvegardées dans la base de données.");
   const [chatbotEnabled, setChatbotEnabled] = useState(true);
   const [manualResponse, setManualResponse] = useState("");
-  const [settingsData, setSettingsData] = useState<Record<string, unknown>>({});
-  const settingsCount = Object.keys(settingsData).length;
-  const chatbotStatusLabel = chatbotEnabled ? "Actif" : "Désactivé";
   const [settingsLoading, setSettingsLoading] = useState(false);
-  const [admins, setAdmins] = useState<Array<{ id: string; name: string; email: string; role: string; isActive: boolean; roleLabel?: string }>>([]);
-  const [conversations, setConversations] = useState<Array<{ id: string; visitorId?: string | null; status?: string; handoff?: boolean; lastMessage?: string; subject?: string }>>([]);
+  const [requestSearch, setRequestSearch] = useState("");
+  const [requestStatusFilter, setRequestStatusFilter] = useState("");
+  const [requestPriorityFilter, setRequestPriorityFilter] = useState("");
+  const [admins, setAdmins] = useState<Array<{ id: string; name: string; email: string; role: string; isActive: boolean; roleLabel?: string; createdAt?: string; updatedAt?: string }>>([]);
+  const [devisList, setDevisList] = useState<DevisActivityItem[]>([]);
+  const [contactMessages, setContactMessages] = useState<ContactActivityItem[]>([]);
+  const [contactsLoading, setContactsLoading] = useState(false);
+  const [contactsError, setContactsError] = useState<string | null>(null);
+  const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
+  const [contactSearch, setContactSearch] = useState("");
+  const [conversations, setConversations] = useState<ConversationActivityItem[]>([]);
+  const [conversationsLoading, setConversationsLoading] = useState(false);
+  const [conversationsError, setConversationsError] = useState<string | null>(null);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [conversationDetailsOpen, setConversationDetailsOpen] = useState(false);
+  const [selectedConversationMessages, setSelectedConversationMessages] = useState<ConversationMessage[]>([]);
+  const [conversationDetailLoading, setConversationDetailLoading] = useState(false);
+  const [selectedRequest, setSelectedRequest] = useState<AdminRequest | null>(null);
+  const [selectedRequestStatus, setSelectedRequestStatus] = useState("");
+  const [requestStatusSaving, setRequestStatusSaving] = useState(false);
+  const [requestStatusMessage, setRequestStatusMessage] = useState<string | null>(null);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [settingsFocusSection, setSettingsFocusSection] = useState<SettingsSectionId>("admin-profile");
+  const [settingsFocusVersion, setSettingsFocusVersion] = useState(0);
   const [handoffLoading, setHandoffLoading] = useState(false);
+  const [clientList, setClientList] = useState<ClientUser[]>(initialUsers);
+  const [clientPanelOpen, setClientPanelOpen] = useState(false);
+  const [clientError, setClientError] = useState<string | null>(null);
+  const [clientMessage, setClientMessage] = useState<string | null>(null);
+  const [editingClientId, setEditingClientId] = useState<string | null>(null);
+  const [clientForm, setClientForm] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    company: "",
+    status: "active" as ClientUser["status"],
+  });
   const [settingDrafts, setSettingDrafts] = useState<Record<string, any>>({
-    profile: { name: "", email: "", password: "" },
+    profile: { name: "", email: "", currentPassword: "", password: "" },
     company: { name: "", email: "", phone: "", address: "", website: "" },
     devis: { recipientEmail: "", autoReply: true, message: "" },
     chatbot: { enabled: true, name: "Tema Assistant", welcomeMessage: "Bonjour, comment puis-je vous aider ?", tone: "professionnel" },
@@ -301,7 +430,109 @@ export default function AdminDashboard() {
 
   const handleNav = (tab: TabType) => {
     setActiveTab(tab);
+    setSelectedRequest(null);
+    setConversationDetailsOpen(false);
+    setNotificationsOpen(false);
     setSidebarOpen(false);
+  };
+
+  const resetClientForm = () => {
+    setEditingClientId(null);
+    setClientForm({
+      name: "",
+      email: "",
+      phone: "",
+      company: "",
+      status: "active",
+    });
+    setClientError(null);
+  };
+
+  const handleEditClient = (client: ClientUser) => {
+    setEditingClientId(client.id);
+    setClientError(null);
+    setClientMessage(null);
+    setClientForm({
+      name: client.name,
+      email: client.email,
+      phone: client.phone === "Non renseigné" ? "" : client.phone,
+      company: client.company === "Non renseignée" ? "" : client.company,
+      status: client.status,
+    });
+    setClientPanelOpen(true);
+  };
+
+  const handleClientSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setClientError(null);
+    setClientMessage(null);
+
+    const name = clientForm.name.trim();
+    const email = clientForm.email.trim().toLowerCase();
+    const phone = clientForm.phone.trim();
+    const company = clientForm.company.trim();
+
+    if (!name || !email) {
+      setClientError("Le nom et l'email sont obligatoires.");
+      return;
+    }
+
+    if (clientList.some((client) => client.email.toLowerCase() === email && client.id !== editingClientId)) {
+      setClientError("Un client avec cet email existe déjà.");
+      return;
+    }
+
+    if (editingClientId) {
+      setClientList((currentClients) =>
+        currentClients.map((client) =>
+          client.id === editingClientId
+            ? {
+                ...client,
+                name,
+                email,
+                phone: phone || "Non renseigné",
+                company: company || "Non renseignée",
+                status: clientForm.status,
+                initials: getClientInitials(name),
+              }
+            : client
+        )
+      );
+      setClientMessage("Client modifié avec succès.");
+      setClientPanelOpen(false);
+      resetClientForm();
+      return;
+    }
+
+    const lastClientNumber = clientList.reduce((max, client) => {
+      const match = client.id.match(/^USR-(\d+)$/);
+      return match ? Math.max(max, Number(match[1])) : max;
+    }, 0);
+
+    const newClient: ClientUser = {
+      id: `USR-${String(lastClientNumber + 1).padStart(3, "0")}`,
+      name,
+      email,
+      phone: phone || "Non renseigné",
+      company: company || "Non renseignée",
+      status: clientForm.status,
+      joined: new Date().toISOString(),
+      requests: 0,
+      initials: getClientInitials(name),
+    };
+
+    setClientList((currentClients) => [newClient, ...currentClients]);
+    setClientMessage("Client ajouté avec succès.");
+    setClientPanelOpen(false);
+    resetClientForm();
+  };
+
+  const openAdminProfile = () => {
+    setSettingsFocusSection("admin-profile");
+    setSettingsFocusVersion((version) => version + 1);
+    setActiveTab("settings");
+    setSelectedRequest(null);
+    setNotificationsOpen(false);
   };
 
   const pageTitle: Record<TabType, string> = {
@@ -337,7 +568,6 @@ export default function AdminDashboard() {
       const response = await getSettings();
       if (response.success && response.data) {
         const data = response.data as Record<string, unknown>;
-        setSettingsData(data);
         setSettingDrafts((prev) => ({
           ...prev,
           profile: { ...prev.profile, ...(typeof data.profile === "object" && data.profile ? data.profile as Record<string, unknown> : {}) },
@@ -350,42 +580,163 @@ export default function AdminDashboard() {
         const chatbotSettings = data.chatbot as { enabled?: boolean } | undefined;
         setChatbotEnabled(Boolean(chatbotSettings?.enabled));
       }
-    } catch (error) {
-      setSettingsMessage("Impossible de charger les réglages depuis le backend.");
+    } catch {
+      // chargement silencieux en cas d'erreur
     } finally {
       setSettingsLoading(false);
     }
   };
 
+  const loadDevis = async () => {
+    try {
+      const response = await getDevisList();
+      if (response.success && Array.isArray(response.data)) {
+        setDevisList(response.data as DevisActivityItem[]);
+      }
+    } catch {
+      // chargement silencieux en cas d'erreur
+    }
+  };
+
+  const loadContacts = async () => {
+    setContactsLoading(true);
+    setContactsError(null);
+    try {
+      const response = await getContactList();
+      if (response.success && Array.isArray(response.data)) {
+        setContactMessages(response.data as ContactActivityItem[]);
+      }
+    } catch (error) {
+      setContactMessages([]);
+      setContactsError(
+        error instanceof Error
+          ? error.message
+          : "Impossible de charger les messages. Connectez-vous en tant qu'admin."
+      );
+    } finally {
+      setContactsLoading(false);
+    }
+  };
+
+  const handleOpenContact = async (contactId: string) => {
+    setSelectedContactId(contactId);
+    const contact = contactMessages.find((item) => item.id === contactId);
+    if (contact?.status === "NON_LU") {
+      try {
+        await updateContactStatus(contactId, "LU");
+        setContactMessages((prev) =>
+          prev.map((item) => (item.id === contactId ? { ...item, status: "LU" } : item))
+        );
+      } catch {
+        // lecture locale même si la mise à jour échoue
+      }
+    }
+  };
+
   const loadConversations = async () => {
+    setConversationsLoading(true);
+    setConversationsError(null);
     try {
       const response = await getConversations();
       if (response.success && Array.isArray(response.data)) {
-        const loaded = response.data as Array<{ id: string; visitorId?: string | null; status?: string; handoff?: boolean; lastMessage?: string; subject?: string }>;
+        const loaded = response.data as ConversationActivityItem[];
         setConversations(loaded);
         if (loaded.length > 0 && !selectedConversationId) {
           setSelectedConversationId(loaded[0].id);
         }
-        if (loaded.length === 0) {
-          const created = await sendChatMessage("Bonjour, je souhaite parler à un conseiller.", null, "demo-visitor");
-          if (created.success && created.data?.conversationId) {
-            setConversations([{ id: created.data.conversationId, visitorId: "demo-visitor", status: "active", handoff: false, lastMessage: created.data.reply, subject: "Conversation de test" }]);
-            setSelectedConversationId(created.data.conversationId);
-          }
-        }
       }
     } catch (error) {
-      setSettingsMessage("Impossible de charger les conversations du backend.");
+      setConversations([]);
+      setConversationsError(
+        error instanceof Error
+          ? error.message
+          : "Impossible de charger les conversations. Connectez-vous en tant qu'admin."
+      );
+    } finally {
+      setConversationsLoading(false);
+    }
+  };
+
+  const loadConversationDetail = async (conversationId: string) => {
+    setConversationDetailLoading(true);
+    try {
+      const response = await getConversationById(conversationId);
+      if (response.success && response.data?.messages) {
+        setSelectedConversationMessages(response.data.messages as ConversationMessage[]);
+      } else {
+        setSelectedConversationMessages([]);
+      }
+    } catch {
+      setSelectedConversationMessages([]);
+    } finally {
+      setConversationDetailLoading(false);
     }
   };
 
   useEffect(() => {
-    if (activeTab === "settings") {
-      loadAdmins();
-      loadSettings();
+    if (activeTab === "overview" || activeTab === "requests") {
+      void loadDevis();
+    }
+    if (activeTab === "overview" || activeTab === "messages") {
+      void loadContacts();
+    }
+    if (activeTab === "overview" || activeTab === "conversations" || activeTab === "settings") {
       void loadConversations();
     }
+    if (activeTab === "overview" || activeTab === "settings") {
+      loadAdmins();
+    }
+    if (activeTab === "settings") {
+      loadSettings();
+    }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== "messages" && activeTab !== "overview") return;
+
+    const interval = window.setInterval(() => {
+      void loadContacts();
+    }, 15000);
+
+    return () => window.clearInterval(interval);
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== "conversations" && activeTab !== "overview") return;
+
+    const interval = window.setInterval(() => {
+      void loadConversations();
+      if (conversationDetailsOpen && selectedConversationId) {
+        void loadConversationDetail(selectedConversationId);
+      }
+    }, 8000);
+
+    return () => window.clearInterval(interval);
+  }, [activeTab, conversationDetailsOpen, selectedConversationId]);
+
+  const unreadContactCount = useMemo(
+    () => contactMessages.filter((contact) => contact.status === "NON_LU").length,
+    [contactMessages]
+  );
+
+  const filteredContactMessages = useMemo(() => {
+    const query = contactSearch.trim().toLowerCase();
+    if (!query) return contactMessages;
+
+    return contactMessages.filter((contact) =>
+      [
+        contact.fullName,
+        contact.email,
+        contact.subject || "",
+        contact.message,
+      ].some((value) => value.toLowerCase().includes(query))
+    );
+  }, [contactMessages, contactSearch]);
+
+  const selectedContact = useMemo(
+    () => contactMessages.find((contact) => contact.id === selectedContactId) ?? null,
+    [contactMessages, selectedContactId]
+  );
 
   const resetAdminForm = () => {
     setEditingAdminId(null);
@@ -459,7 +810,6 @@ export default function AdminDashboard() {
   };
 
   const handleDeleteAdmin = async (adminId: string) => {
-    if (!window.confirm("Supprimer cet administrateur ?")) return;
     setAdminError(null);
     setAdminMessage(null);
     try {
@@ -474,48 +824,37 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleSettingSave = async (key: string, value: unknown) => {
+  const handleDeactivateAdmin = async (admin: { id: string; name: string; email: string; role: string; isActive: boolean }) => {
+    setAdminError(null);
+    setAdminMessage(null);
     try {
-      const response = await updateSetting(key, value);
+      const response = await updateAdmin(admin.id, {
+        name: admin.name,
+        email: admin.email,
+        role: admin.role,
+        isActive: false,
+      });
       if (!response.success) {
-        throw new Error(response.message || "La sauvegarde a échoué.");
+        throw new Error(response.message || "La désactivation a échoué.");
       }
-      setSettingsData((prev) => ({ ...prev, [key]: value }));
-      setSettingsMessage(`Réglage “${key}” enregistré.`);
-      await loadSettings();
+      setAdminMessage("Administrateur désactivé.");
+      await loadAdmins();
     } catch (error) {
-      setSettingsMessage(error instanceof Error ? error.message : "Erreur pendant la sauvegarde.");
+      setAdminError(error instanceof Error ? error.message : "Une erreur est survenue.");
     }
   };
 
-  const saveCurrentSetting = async () => {
-    if (!selectedSetting) {
-      setSettingsMessage("Sélectionnez d’abord une section à enregistrer.");
-      return;
+  const handleSettingSave = async (key: string, value: unknown) => {
+    const response = await updateSetting(key, value);
+    if (!response.success) {
+      throw new Error(response.message || "La sauvegarde a échoué.");
     }
-
-    const keyMap: Record<string, string> = {
-      "Profil administrateur": "profile",
-      "Informations de l’entreprise": "company",
-      "Demandes de devis": "devis",
-      "Chatbot IA": "chatbot",
-      "Notifications": "notifications",
-      "Sécurité": "security",
-    };
-
-    const key = keyMap[selectedSetting];
-    if (!key) {
-      setSettingsMessage("Section non prise en charge.");
-      return;
-    }
-
-    await handleSettingSave(key, settingDrafts[key]);
+    await loadSettings();
   };
 
   const handleHandoff = async (conversationId?: string) => {
     const targetConversationId = conversationId || selectedConversationId;
     if (!targetConversationId) {
-      setSettingsMessage("Aucune conversation n’est disponible pour le transfert.");
       return;
     }
 
@@ -526,22 +865,147 @@ export default function AdminDashboard() {
         throw new Error(response.message || "Échec du transfert.");
       }
       setConversations((prev) => prev.map((conversation) => conversation.id === targetConversationId ? { ...conversation, status: "transferred", handoff: true } : conversation));
-      setSettingsMessage("Conversation transférée vers l’équipe humaine.");
       setManualResponse("");
-    } catch (error) {
-      setSettingsMessage(error instanceof Error ? error.message : "Erreur lors du transfert.");
+      await loadConversations();
+      await loadConversationDetail(targetConversationId);
     } finally {
       setHandoffLoading(false);
     }
   };
 
+  const handleRequestStatusUpdate = async () => {
+    if (!selectedRequest || !selectedRequestStatus) {
+      return;
+    }
+
+    setRequestStatusSaving(true);
+    setRequestStatusMessage(null);
+    try {
+      const backendStatus = toBackendDevisStatus(selectedRequestStatus);
+      const response = await updateDevisStatus(selectedRequest.id, backendStatus);
+      if (!response.success) {
+        throw new Error(response.message || "La mise à jour du statut a échoué.");
+      }
+      setSelectedRequest((prev) => prev ? { ...prev, status: selectedRequestStatus, priority: calculateRequestPriority({ ...prev, status: selectedRequestStatus }) } : prev);
+      setRequestStatusMessage("Statut mis à jour avec succès.");
+      await loadDevis();
+    } catch (error) {
+      setRequestStatusMessage(error instanceof Error ? error.message : "La mise à jour du statut a échoué.");
+    } finally {
+      setRequestStatusSaving(false);
+    }
+  };
+
+  const recentActivities = useMemo(() => {
+    const activities = [
+      ...devisList.map((devis) => ({
+        id: `devis-${devis.id}`,
+        title: "Nouvelle demande reçue",
+        description: `${devis.fullName} · ${devis.projectType}`,
+        date: toDate(devis.createdAt),
+        icon: FileText,
+      })),
+      ...contactMessages.map((contact) => ({
+        id: `contact-${contact.id}`,
+        title: "Nouveau message contact",
+        description: contact.fullName,
+        date: toDate(contact.createdAt),
+        icon: Mail,
+      })),
+      ...conversations.map((conversation) => ({
+        id: `conversation-${conversation.id}`,
+        title: conversation.status === "needs_support"
+          ? "Support requis"
+          : conversation.handoff
+            ? "Conversation transférée"
+            : "Conversation IA en attente",
+        description: conversation.subject || conversation.clientName || conversation.visitorId || "Visiteur anonyme",
+        date: toDate(conversation.updatedAt || conversation.createdAt),
+        icon: MessageCircle,
+      })),
+      ...admins.map((admin) => ({
+        id: `admin-${admin.id}`,
+        title: "Administrateur ajouté",
+        description: admin.name,
+        date: toDate(admin.createdAt),
+        icon: UserPlus,
+      })),
+    ]
+      .filter((activity) => activity.date)
+      .sort((a, b) => (b.date?.getTime() ?? 0) - (a.date?.getTime() ?? 0))
+      .slice(0, 5);
+
+    return activities;
+  }, [admins, contactMessages, conversations, devisList]);
+
+  const newRequestsCount = devisList.filter((devis) => devis.status === "NOUVELLE").length;
+  const pendingConversationsCount = conversations.filter((conversation) => conversation.status === "needs_support" || conversation.handoff || conversation.status === "pending").length;
+  const connectedAdminsCount = admins.filter((admin) => admin.isActive).length;
+  const realRequests = useMemo<AdminRequest[]>(
+    () => devisList.map((devis) => ({
+      id: devis.id,
+      client: devis.fullName,
+      email: devis.email,
+      type: devis.projectType,
+      budget: devis.budget || "À définir",
+      status: normalizeDevisStatus(devis.status),
+      priority: "low",
+      date: devis.createdAt,
+      phone: devis.phone,
+      description: devis.description,
+    })),
+    [devisList]
+  );
+  const scoredRequests = useMemo(
+    () => realRequests.map((request) => ({ ...request, priority: calculateRequestPriority(request) })),
+    [realRequests]
+  );
+  const filteredRequests = useMemo(() => {
+    const query = requestSearch.trim().toLowerCase();
+
+    return scoredRequests.filter((request) => {
+      const matchesSearch = !query || [
+        request.id,
+        request.client,
+        request.email,
+        request.type,
+        request.budget,
+        requestStatusLabels[request.status],
+        requestPriorityLabels[request.priority],
+      ].some((value) => value.toLowerCase().includes(query));
+      const matchesStatus = !requestStatusFilter || request.status === requestStatusFilter;
+      const matchesPriority = !requestPriorityFilter || request.priority === requestPriorityFilter;
+
+      return matchesSearch && matchesStatus && matchesPriority;
+    });
+  }, [requestPriorityFilter, requestSearch, requestStatusFilter, scoredRequests]);
+  const conversationRows: ConversationRow[] = conversations.map((conversation) => ({
+    id: conversation.id,
+    user: conversation.clientName || conversation.clientEmail || conversation.visitorId || "Visiteur anonyme",
+    subject: conversation.subject || "Conversation IA",
+    lastMessage: conversation.lastMessage || "Aucun message récent",
+    date: toDate(conversation.updatedAt || conversation.createdAt)?.toLocaleString("fr-FR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }) ?? "Date inconnue",
+    status: conversation.status === "needs_support"
+      ? "needs_support"
+      : conversation.handoff
+        ? "transferred"
+        : conversation.status || "active",
+  }));
+  const selectedConversation = conversationRows.find((conversation) => conversation.id === selectedConversationId) ?? null;
+
   return (
-    <div className="flex h-screen overflow-hidden" style={{ fontFamily: "'Inter', sans-serif", background: "#F1F5F9" }}>
+    <div className="flex h-screen overflow-hidden bg-[#F8FAFC] dark:bg-background font-sans text-[#0F172A] dark:text-foreground">
 
       {/* ── Mobile overlay ── */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 z-20 bg-black/40 lg:hidden"
+          className="fixed inset-0 z-20 bg-[#0F172A]/20 backdrop-blur-sm transition-opacity duration-200 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
@@ -549,408 +1013,503 @@ export default function AdminDashboard() {
       {/* ══════════ SIDEBAR ══════════ */}
       <aside
         className={`
-          fixed lg:static inset-y-0 left-0 z-30 w-64 flex-shrink-0
-          bg-white border-r border-slate-100 flex flex-col
-          transition-transform duration-300 ease-in-out
+          fixed inset-y-0 left-0 z-30 flex w-[250px] flex-shrink-0 flex-col
+          bg-white dark:bg-card transition-transform duration-250 ease-out
+          lg:static
           ${sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
         `}
       >
         {/* Logo */}
-        <div className="flex items-center gap-3 px-5 h-16 border-b border-slate-100 flex-shrink-0">
-          <div className="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center shadow-sm flex-shrink-0">
-            <span className="text-white font-bold text-xs tracking-tight">TC</span>
-          </div>
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-slate-900 truncate">Tema Concept</p>
-            <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wide">Administration</p>
+        <div className="flex h-[72px] flex-shrink-0 items-center gap-3 px-6">
+          <div className="min-w-0 flex-1">
+            <TemaLogo variant="admin" />
           </div>
           <button
             onClick={() => setSidebarOpen(false)}
-            className="ml-auto lg:hidden p-1 rounded text-slate-400 hover:text-slate-600"
+            className={`${ui.btnGhost} !p-1.5 lg:hidden`}
           >
-            <X className="w-4 h-4" />
+            <X className="h-[18px] w-[18px]" />
           </button>
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 py-4 px-3 space-y-0.5 overflow-y-auto">
-          <p className="px-3 pt-2 pb-1 text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Principal</p>
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const active = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => handleNav(item.id)}
-                className={`
-                  w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium
-                  transition-all duration-150 group
-                  ${active
-                    ? "bg-blue-50 text-blue-700"
-                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}
-                `}
-              >
-                <Icon className={`w-4 h-4 flex-shrink-0 ${active ? "text-blue-600" : "text-slate-400 group-hover:text-slate-600"}`} />
-                <span className="flex-1 text-left truncate">{item.label}</span>
-                {item.badge && (
-                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${active ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"}`}>
-                    {item.badge}
-                  </span>
-                )}
-                {active && <div className="w-1 h-4 rounded-full bg-blue-600" />}
-              </button>
-            );
-          })}
+        <nav className="flex-1 space-y-7 overflow-y-auto px-4 py-3">
+          {navGroups.map((group) => (
+            <div key={group}>
+              <p className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#94A3B8] dark:text-muted-foreground">{group}</p>
+              <div className="space-y-1">
+                {navItems.filter((item) => item.group === group).map((item) => {
+                  const Icon = item.icon;
+                  const active = activeTab === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => handleNav(item.id)}
+                      className={`
+                        group relative flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-sm
+                        transition-all duration-200 hover:translate-x-0.5
+                        ${active
+                          ? "bg-[#F8FAFC] dark:bg-muted/60 font-semibold text-[#0F172A] dark:text-foreground"
+                          : "font-medium text-[#64748B] dark:text-muted-foreground hover:bg-[#F8FAFC] dark:hover:bg-muted/40 hover:text-[#0F172A] dark:hover:text-foreground"}
+                      `}
+                    >
+                      {active && (
+                        <span className="absolute left-0 top-1/2 h-5 w-[2px] -translate-y-1/2 rounded-r-full bg-[#2563EB]" />
+                      )}
+                      <Icon className={`h-[18px] w-[18px] flex-shrink-0 transition-colors ${active ? "text-[#2563EB]" : "text-[#94A3B8] group-hover:text-[#64748B]"}`} />
+                      <span className="flex-1 truncate text-left">{item.label}</span>
+                      {item.id === "messages" && unreadContactCount > 0 && (
+                        <span className={`min-w-[20px] rounded-md px-1.5 py-0.5 text-center text-[11px] font-semibold ${active ? "bg-[#2563EB] text-white" : "bg-[#F1F5F9] dark:bg-muted text-[#64748B] dark:text-muted-foreground"}`}>
+                          {unreadContactCount}
+                        </span>
+                      )}
+                      {item.badge !== undefined && (
+                        <span className={`min-w-[20px] rounded-md px-1.5 py-0.5 text-center text-[11px] font-semibold ${active ? "bg-[#2563EB] text-white" : "bg-[#F1F5F9] dark:bg-muted text-[#64748B] dark:text-muted-foreground"}`}>
+                          {item.badge}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
 
         {/* Bottom actions */}
-        <div className="flex-shrink-0 border-t border-slate-100 px-3 py-3 space-y-0.5">
+        <div className="flex-shrink-0 space-y-1 border-t border-[#EEF2F7] px-4 py-4 dark:border-border">
           <button
             onClick={() => handleNav("settings")}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${activeTab === "settings" ? "bg-blue-50 text-blue-700" : "text-slate-600 hover:bg-slate-50"}`}
+            className={`
+              flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium transition-all duration-200 hover:translate-x-0.5
+              ${activeTab === "settings" ? "bg-[#F8FAFC] dark:bg-muted/60 font-semibold text-[#0F172A] dark:text-foreground" : "text-[#64748B] dark:text-muted-foreground hover:bg-[#F8FAFC] dark:hover:bg-muted/40 hover:text-[#0F172A] dark:hover:text-foreground"}
+            `}
           >
-            <Settings className="w-4 h-4 text-slate-400" />
+            <Settings className="h-[18px] w-[18px] text-[#94A3B8]" />
             Paramètres
           </button>
           <Link
             to="/"
-            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-600 hover:bg-red-50 hover:text-red-600 transition-all"
+            className="flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium text-[#64748B] dark:text-muted-foreground transition-all duration-200 hover:translate-x-0.5 hover:bg-red-50 dark:hover:bg-red-950/30 hover:text-[#EF4444]"
           >
-            <LogOut className="w-4 h-4 text-slate-400" />
+            <LogOut className="h-[18px] w-[18px] text-[#94A3B8]" />
             Déconnexion
           </Link>
         </div>
       </aside>
 
       {/* ══════════ MAIN AREA ══════════ */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
 
         {/* ── Top bar ── */}
-        <header className="flex-shrink-0 h-16 bg-white border-b border-slate-100 flex items-center gap-4 px-6">
+        <header className="flex h-[72px] flex-shrink-0 items-center gap-4 border-b border-[#EEF2F7] bg-white/80 px-8 backdrop-blur-sm dark:border-border dark:bg-card/80">
           <button
             onClick={() => setSidebarOpen(true)}
-            className="lg:hidden p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors"
+            className={`${ui.btnGhost} lg:hidden`}
           >
-            <Menu className="w-5 h-5" />
+            <Menu className="h-5 w-5" />
           </button>
 
-          <div className="flex-1">
-            <p className="text-sm text-slate-500">
-              Bonjour, <span className="font-semibold text-slate-900">Admin</span> 👋
-            </p>
-          </div>
-
           {/* Search */}
-          <div className="relative hidden md:block">
-            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <div className="relative hidden flex-1 md:block md:max-w-sm">
+            <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94A3B8]" />
             <input
               type="text"
               placeholder="Rechercher..."
-              className="pl-9 pr-4 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-300 w-56 transition-all"
+              className="w-full rounded-full border border-[#EEF2F7] bg-[#F8FAFC] px-4 py-2.5 pl-10 text-sm text-[#0F172A] outline-none transition-all placeholder:text-[#94A3B8] focus:border-[#CBD5E1] focus:bg-white dark:border-border dark:bg-muted/40 dark:text-foreground dark:focus:bg-card"
             />
           </div>
 
-          {/* Notification */}
-          <button className="relative p-2 rounded-xl hover:bg-slate-100 transition-colors">
-            <Bell className="w-4.5 h-4.5 text-slate-500" style={{ width: "18px", height: "18px" }} />
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full ring-2 ring-white" />
-          </button>
+          <div className="ml-auto flex items-center gap-2.5">
+            <ThemeToggle />
+            {/* Notification */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setNotificationsOpen((open) => !open)}
+                className={`${ui.btnGhost} relative !p-2.5`}
+                aria-label="Afficher les notifications"
+              >
+                <Bell className="h-[18px] w-[18px]" />
+                {recentActivities.length > 0 && (
+                  <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[#EF4444] ring-2 ring-white dark:ring-card" />
+                )}
+              </button>
 
-          {/* Avatar */}
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center shadow-sm cursor-pointer">
-            <span className="text-white text-xs font-bold">AD</span>
+              {notificationsOpen && (
+                <div className="absolute right-0 top-12 z-40 w-80 overflow-hidden rounded-2xl border border-[#E2E8F0] bg-white shadow-[0_18px_45px_rgba(15,23,42,0.14)] dark:border-border dark:bg-card">
+                  <div className="border-b border-[#F1F5F9] px-4 py-3 dark:border-border">
+                    <p className="text-sm font-semibold text-[#0F172A] dark:text-foreground">Notifications</p>
+                    <p className="mt-0.5 text-xs text-[#64748B] dark:text-muted-foreground">Dernières activités de la plateforme</p>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto p-2">
+                    {recentActivities.length === 0 ? (
+                      <div className="rounded-xl px-3 py-6 text-center text-sm text-[#64748B] dark:text-muted-foreground">
+                        Aucune notification pour le moment.
+                      </div>
+                    ) : (
+                      recentActivities.map((activity) => {
+                        const Icon = activity.icon;
+                        return (
+                          <button
+                            key={activity.id}
+                            type="button"
+                            onClick={() => setNotificationsOpen(false)}
+                            className="flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left transition-colors hover:bg-[#F8FAFC] dark:hover:bg-muted/50"
+                          >
+                            <span className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[#F1F5F9] text-[#64748B] dark:bg-muted dark:text-muted-foreground">
+                              <Icon className="h-4 w-4" />
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-sm font-medium text-[#0F172A] dark:text-foreground">{activity.title}</span>
+                              <span className="mt-0.5 block truncate text-xs text-[#64748B] dark:text-muted-foreground">{activity.description}</span>
+                              <span className="mt-1 block text-xs text-[#94A3B8] dark:text-muted-foreground">{formatRelativeTime(activity.date)}</span>
+                            </span>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* User */}
+            <div className="flex items-center gap-3 pl-2">
+              <div className="hidden text-right sm:block">
+                <p className="text-sm font-medium text-[#0F172A] dark:text-foreground">Admin</p>
+                <p className="text-xs text-[#64748B] dark:text-muted-foreground">Super Admin</p>
+              </div>
+              <button
+                type="button"
+                onClick={openAdminProfile}
+                className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-[#2563EB] transition-transform duration-200 hover:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/30"
+                aria-label="Ouvrir le profil administrateur"
+              >
+                <span className="text-xs font-semibold text-white">AD</span>
+              </button>
+            </div>
           </div>
         </header>
 
         {/* ── Page content ── */}
-        <main className="flex-1 overflow-y-auto px-6 py-6 space-y-6" style={{ scrollbarWidth: "none" }}>
+        <main className={`flex-1 overflow-y-auto ${activeTab === "settings" ? "" : "space-y-8 p-8"}`} style={{ scrollbarWidth: "thin" }}>
 
-          {/* Page heading */}
+          {activeTab !== "settings" && (
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-xl font-semibold text-slate-900">{pageTitle[activeTab]}</h1>
+              <h1 className="text-[32px] font-bold tracking-tight text-[#0F172A] dark:text-foreground">
+                {selectedRequest ? "Détail de la demande" : pageTitle[activeTab]}
+              </h1>
               {activeTab === "overview" && (
-                <p className="text-sm text-slate-500 mt-0.5">Vue générale des activités de Tema Concept</p>
+                <p className="mt-1 text-sm text-[#64748B] dark:text-muted-foreground">Vue générale des activités de Tema Concept</p>
+              )}
+              {selectedRequest && (
+                <p className="mt-1 text-sm text-[#64748B] dark:text-muted-foreground">
+                  {selectedRequest.id} · {selectedRequest.client}
+                </p>
               )}
             </div>
             {activeTab === "overview" && (
-              <div className="flex items-center gap-2 text-xs text-slate-500 bg-white border border-slate-100 rounded-xl px-3 py-2">
-                <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                Mis à jour à l'instant
+              <div className="hidden items-center gap-2 rounded-lg bg-white px-3.5 py-2 text-xs text-[#64748B] shadow-[0_1px_2px_rgba(15,23,42,0.04)] sm:flex">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#22C55E]" />
+                Mis à jour à l&apos;instant
               </div>
             )}
           </div>
+          )}
 
           {/* ════════ OVERVIEW TAB ════════ */}
           {activeTab === "overview" && (
-            <div className="space-y-6">
-
-              {/* Stat cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-                {statCards.map((card, i) => {
-                  const Icon = card.icon;
-                  return (
-                    <div key={i} className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 flex flex-col gap-4 hover:shadow-md transition-shadow">
-                      <div className="flex items-start justify-between">
-                        <div className={`w-10 h-10 rounded-xl ${card.iconBg} flex items-center justify-center`}>
-                          <Icon className={`w-5 h-5 ${card.iconColor}`} />
-                        </div>
-                        <span className={`inline-flex items-center gap-0.5 text-xs font-medium ${card.up ? "text-emerald-600" : "text-red-500"}`}>
-                          {card.up ? <ArrowUpRight className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
-                          {card.change}
-                        </span>
-                      </div>
-                      <div>
-                        <p className="text-3xl font-bold text-slate-900 tracking-tight">{card.value}</p>
-                        <p className="text-xs text-slate-500 mt-0.5 leading-snug">{card.label}</p>
-                      </div>
-                      <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full ${card.barColor} transition-all`} style={{ width: card.barWidth }} />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Charts row */}
-              <div className="grid xl:grid-cols-3 gap-4">
-                {/* Area chart */}
-                <div className="xl:col-span-2 bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-                  <div className="flex items-center justify-between mb-5">
-                    <div>
-                      <h3 className="text-sm font-semibold text-slate-900">Évolution des demandes</h3>
-                      <p className="text-xs text-slate-500">Demandes et conversations — 6 derniers mois</p>
-                    </div>
-                    <div className="flex items-center gap-4 text-xs text-slate-500">
-                      <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />Demandes</span>
-                      <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-violet-400 inline-block" />Conversations</span>
-                    </div>
-                  </div>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <AreaChart data={monthlyData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="gradDemandes" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#2563EB" stopOpacity={0.15} />
-                          <stop offset="95%" stopColor="#2563EB" stopOpacity={0} />
-                        </linearGradient>
-                        <linearGradient id="gradConv" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#7C3AED" stopOpacity={0.12} />
-                          <stop offset="95%" stopColor="#7C3AED" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
-                      <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#94A3B8" }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fontSize: 11, fill: "#94A3B8" }} axisLine={false} tickLine={false} />
-                      <Tooltip content={<ChartTooltip />} />
-                      <Area type="monotone" dataKey="conversations" name="Conversations" stroke="#7C3AED" strokeWidth={2} fill="url(#gradConv)" dot={false} activeDot={{ r: 4, strokeWidth: 0 }} />
-                      <Area type="monotone" dataKey="demandes" name="Demandes" stroke="#2563EB" strokeWidth={2} fill="url(#gradDemandes)" dot={false} activeDot={{ r: 4, strokeWidth: 0 }} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-
-                {/* Pie chart */}
-                <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-                  <div className="mb-3">
-                    <h3 className="text-sm font-semibold text-slate-900">Répartition par service</h3>
-                    <p className="text-xs text-slate-500">156 demandes au total</p>
-                  </div>
-                  <ResponsiveContainer width="100%" height={160}>
-                    <PieChart>
-                      <Pie
-                        data={serviceDistribution}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={48}
-                        outerRadius={72}
-                        paddingAngle={3}
-                        dataKey="value"
-                      >
-                        {serviceDistribution.map((entry, i) => (
-                          <Cell key={i} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div className="mt-3 space-y-2">
-                    {serviceDistribution.map((s, i) => (
-                      <div key={i} className="flex items-center gap-2 text-xs">
-                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: s.color }} />
-                        <span className="flex-1 text-slate-600 truncate">{s.name}</span>
-                        <span className="font-semibold text-slate-800">{s.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Requests table + side panels */}
-              <div className="grid xl:grid-cols-3 gap-4">
-
-                {/* Requests table */}
-                <div className="xl:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                  <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-                    <h3 className="text-sm font-semibold text-slate-900">Dernières demandes</h3>
-                    <button
-                      onClick={() => setActiveTab("requests")}
-                      className="text-xs font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1 transition-colors"
-                    >
-                      Voir tout <ChevronRight className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr className="border-b border-slate-50">
-                          <th className="px-5 py-3 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Client</th>
-                          <th className="px-5 py-3 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Type de projet</th>
-                          <th className="px-5 py-3 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Budget</th>
-                          <th className="px-5 py-3 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Statut</th>
-                          <th className="px-5 py-3 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Date</th>
-                          <th className="px-5 py-3 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-50">
-                        {requests.slice(0, 5).map((req) => (
-                          <tr key={req.id} className="hover:bg-slate-50/60 transition-colors">
-                            <td className="px-5 py-3.5">
-                              <p className="text-sm font-medium text-slate-900">{req.client}</p>
-                              <p className="text-xs text-slate-400">{req.email}</p>
-                            </td>
-                            <td className="px-5 py-3.5">
-                              <span className="text-sm text-slate-700">{req.type}</span>
-                            </td>
-                            <td className="px-5 py-3.5">
-                              <span className="text-sm font-medium text-slate-800" style={{ fontFamily: "'DM Mono', monospace" }}>{req.budget}</span>
-                            </td>
-                            <td className="px-5 py-3.5">
-                              <StatusBadge status={req.status} />
-                            </td>
-                            <td className="px-5 py-3.5">
-                              <span className="text-xs text-slate-500">{new Date(req.date).toLocaleDateString("fr-FR")}</span>
-                            </td>
-                            <td className="px-5 py-3.5">
-                              <Link
-                                to={`/request/${req.id}`}
-                                className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-1.5 rounded-lg transition-colors"
-                              >
-                                <Eye className="w-3.5 h-3.5" />
-                                Détails
-                              </Link>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Side: Recent messages + AI activity */}
-                <div className="space-y-4">
-                  {/* Recent messages */}
-                  <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                    <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-                      <h3 className="text-sm font-semibold text-slate-900">Messages récents</h3>
-                      <button
-                        onClick={() => setActiveTab("messages")}
-                        className="text-xs font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1"
-                      >
-                        Voir tout <ChevronRight className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                    <div className="divide-y divide-slate-50">
-                      {recentMessages.slice(0, 4).map((msg, i) => (
-                        <div key={i} className="flex items-start gap-3 px-5 py-3.5 hover:bg-slate-50/60 cursor-pointer transition-colors">
-                          <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                            <span className="text-[10px] font-bold text-blue-700">{msg.initials}</span>
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <p className="text-xs font-semibold text-slate-900 truncate">{msg.from}</p>
-                              {!msg.read && <span className="w-1.5 h-1.5 bg-blue-500 rounded-full flex-shrink-0" />}
-                            </div>
-                            <p className="text-xs text-slate-500 truncate mt-0.5">{msg.subject}</p>
-                            <p className="text-[10px] text-slate-400 mt-0.5">{msg.date}</p>
-                          </div>
+            <div className="space-y-8">
+              <section className={`${ui.card} ${ui.cardHover} overflow-hidden rounded-[24px] border border-[#EEF2F7] dark:border-border p-8 md:p-10`}>
+                <div className="flex flex-col gap-10 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="max-w-2xl">
+                    <p className="text-sm font-medium text-[#64748B] dark:text-muted-foreground">Bonjour Admin</p>
+                    <h2 className="mt-3 text-3xl font-semibold tracking-tight text-[#0F172A] dark:text-foreground md:text-4xl">
+                      Votre plateforme est en bonne santé.
+                    </h2>
+                    <div className="mt-8 grid gap-6 sm:grid-cols-3">
+                      {[
+                        { value: String(newRequestsCount), label: "nouvelles demandes" },
+                        { value: String(pendingConversationsCount), label: "conversations en attente" },
+                        { value: String(connectedAdminsCount), label: "administrateurs actifs" },
+                      ].map((item) => (
+                        <div key={item.label}>
+                          <p className="text-3xl font-semibold tracking-tight text-[#0F172A] dark:text-foreground">{item.value}</p>
+                          <p className="mt-1 text-sm text-[#64748B] dark:text-muted-foreground">{item.label}</p>
                         </div>
                       ))}
                     </div>
-                  </div>
-
-                  {/* AI chatbot activity */}
-                  <div className="bg-gradient-to-br from-blue-600 to-violet-700 rounded-2xl p-5 text-white shadow-sm">
-                    <div className="flex items-center gap-2 mb-4">
-                      <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center">
-                        <Zap className="w-4 h-4 text-white" />
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-semibold">Activité de l'IA</h3>
-                        <p className="text-[10px] text-white/70">Assistant Tema</p>
-                      </div>
-                    </div>
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-white/80">Conversations totales</span>
-                        <span className="text-sm font-bold">256</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-white/80">Taux de résolution</span>
-                        <span className="text-sm font-bold">91%</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-white/80">Temps de réponse moy.</span>
-                        <span className="text-sm font-bold">1.8s</span>
-                      </div>
-                      <div className="w-full h-1.5 bg-white/20 rounded-full mt-2">
-                        <div className="h-full w-[91%] bg-white/80 rounded-full" />
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => setActiveTab("conversations")}
-                      className="mt-4 w-full py-2 bg-white/15 hover:bg-white/25 rounded-xl text-xs font-semibold text-white transition-colors flex items-center justify-center gap-1.5"
-                    >
-                      <MessageCircle className="w-3.5 h-3.5" />
-                      Voir les conversations
+                    <button onClick={() => setActiveTab("requests")} className={`${ui.btnPrimary} mt-9`}>
+                      Voir les demandes
+                      <ChevronRight className="h-4 w-4" />
                     </button>
                   </div>
-                </div>
-              </div>
 
-              {/* Performance bar */}
-              <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-                <h3 className="text-sm font-semibold text-slate-900 mb-4">Performances de la plateforme</h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                  {[
-                    { label: "Taux de traitement", value: "60%", color: "text-emerald-600" },
-                    { label: "Service populaire", value: "Dev Web", color: "text-blue-600" },
-                    { label: "Réponse IA moyenne", value: "1.8s", color: "text-blue-600" },
-                    { label: "Satisfaction client", value: "94%", color: "text-emerald-600" },
-                  ].map((p, i) => (
-                    <div key={i} className="flex flex-col gap-1">
-                      <span className="text-xs text-slate-500">{p.label}</span>
-                      <span className={`text-2xl font-bold ${p.color} tracking-tight`}>{p.value}</span>
-                    </div>
-                  ))}
+                  <div className="relative hidden h-44 w-44 flex-shrink-0 items-center justify-center lg:flex">
+                    <div className="absolute inset-0 rounded-[36px] border border-[#EEF2F7] dark:border-border" />
+                    <Bot className="h-20 w-20 text-[#CBD5E1] dark:text-muted-foreground/50" strokeWidth={1.4} />
+                    <span className="absolute right-8 top-8 h-2.5 w-2.5 rounded-full bg-[#22C55E]" />
+                  </div>
                 </div>
-              </div>
+              </section>
+
+              <section className="grid gap-8 xl:grid-cols-[minmax(0,1.85fr)_minmax(320px,1fr)]">
+                <div className={`${ui.card} rounded-[24px] border border-[#EEF2F7] dark:border-border p-7`}>
+                  <div className="mb-8 flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <h3 className="text-lg font-semibold tracking-tight text-[#0F172A] dark:text-foreground">Évolution des demandes de devis</h3>
+                      <p className="mt-1 text-sm text-[#64748B] dark:text-muted-foreground">Vue simplifiée des demandes reçues.</p>
+                    </div>
+                    <div className="flex rounded-full bg-[#F8FAFC] dark:bg-muted p-1 text-xs">
+                      {["Today", "7 days", "30 days", "Year"].map((period, index) => (
+                        <button
+                          key={period}
+                          className={`rounded-full px-3 py-1.5 font-medium transition-colors ${index === 2 ? "bg-white dark:bg-card text-[#0F172A] dark:text-foreground shadow-sm" : "text-[#64748B] dark:text-muted-foreground hover:text-[#0F172A] dark:hover:text-foreground"}`}
+                        >
+                          {period}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <LineChart data={monthlyData} margin={{ top: 10, right: 12, left: -24, bottom: 0 }}>
+                      <XAxis dataKey="month" tick={{ fontSize: 12, fill: "#94A3B8" }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 12, fill: "#94A3B8" }} axisLine={false} tickLine={false} width={42} />
+                      <Tooltip content={<ChartTooltip />} />
+                      <Line type="monotone" dataKey="demandes" name="Demandes" stroke="#2563EB" strokeWidth={2.5} dot={false} activeDot={{ r: 4, strokeWidth: 0, fill: "#2563EB" }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className={`${ui.card} rounded-[24px] border border-[#EEF2F7] dark:border-border p-7`}>
+                  <h3 className="text-lg font-semibold tracking-tight text-[#0F172A] dark:text-foreground">Activités récentes</h3>
+                  <div className="mt-7 space-y-6">
+                    {recentActivities.length === 0 && (
+                      <div className="rounded-2xl bg-[#F8FAFC] p-5 text-sm text-[#64748B] dark:bg-muted dark:text-muted-foreground">
+                        Aucune activité récente pour le moment.
+                      </div>
+                    )}
+                    {recentActivities.map((activity) => {
+                      const Icon = activity.icon;
+                      return (
+                        <div key={activity.id} className="flex items-start gap-4">
+                          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[#F8FAFC] dark:bg-muted">
+                            <Icon className="h-4 w-4 text-[#64748B] dark:text-muted-foreground" strokeWidth={1.8} />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-[#0F172A] dark:text-foreground">{activity.title}</p>
+                            <p className="mt-0.5 truncate text-xs text-[#64748B] dark:text-muted-foreground">{activity.description}</p>
+                            <p className="mt-1 text-xs text-[#94A3B8] dark:text-muted-foreground">{formatRelativeTime(activity.date)}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </section>
+
             </div>
           )}
 
           {/* ════════ REQUESTS TAB ════════ */}
           {activeTab === "requests" && (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-              <div className="px-6 py-5 border-b border-slate-100">
-                <div className="flex flex-col md:flex-row md:items-center gap-4">
+            selectedRequest ? (
+              <div className="space-y-6">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedRequest(null);
+                    setSelectedRequestStatus("");
+                    setRequestStatusMessage(null);
+                  }}
+                  className={`${ui.btnGhost} !px-0 hover:!bg-transparent`}
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Retour aux demandes
+                </button>
+
+                <section className={`${ui.card} rounded-[24px] border border-[#EEF2F7] p-7 dark:border-border`}>
+                  <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                      <div className="mb-3 flex flex-wrap items-center gap-3">
+                        <h2 className="text-2xl font-semibold tracking-tight text-[#0F172A] dark:text-foreground">{selectedRequest.type}</h2>
+                        <StatusBadge status={selectedRequest.status} />
+                        <PriorityBadge priority={selectedRequest.priority} />
+                      </div>
+                      <p className="text-sm text-[#64748B] dark:text-muted-foreground">ID : {selectedRequest.id}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" className={ui.btnSecondary}>Imprimer</button>
+                    </div>
+                  </div>
+
+                  <div className="mt-7 grid gap-4 md:grid-cols-3">
+                    <div className="flex items-center gap-3 rounded-2xl bg-[#F8FAFC] p-4 dark:bg-muted/40">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-[#2563EB] dark:bg-blue-950/40">
+                        <FileText className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-[#64748B] dark:text-muted-foreground">Type de service</p>
+                        <p className="text-sm font-medium text-[#0F172A] dark:text-foreground">{selectedRequest.type}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 rounded-2xl bg-[#F8FAFC] p-4 dark:bg-muted/40">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-green-50 text-[#16A34A] dark:bg-green-950/40">
+                        <Calendar className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-[#64748B] dark:text-muted-foreground">Date</p>
+                        <p className="text-sm font-medium text-[#0F172A] dark:text-foreground">{new Date(selectedRequest.date).toLocaleDateString("fr-FR")}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 rounded-2xl bg-[#F8FAFC] p-4 dark:bg-muted/40">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-50 text-[#7C3AED] dark:bg-violet-950/40">
+                        <DollarSign className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-[#64748B] dark:text-muted-foreground">Budget</p>
+                        <p className="text-sm font-medium text-[#0F172A] dark:text-foreground">{selectedRequest.budget}</p>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
+                  <div className="space-y-6">
+                    <div className={`${ui.card} rounded-[24px] border border-[#EEF2F7] p-6 dark:border-border`}>
+                      <h3 className="text-lg font-semibold text-[#0F172A] dark:text-foreground">Informations du client</h3>
+                      <div className="mt-5 grid gap-4 md:grid-cols-2">
+                        {[
+                          { label: "Nom complet", value: selectedRequest.client, icon: User },
+                          { label: "Email", value: selectedRequest.email, icon: Mail },
+                          { label: "Téléphone", value: "+212 6XX-XXXXXX", icon: Phone },
+                          { label: "Entreprise", value: "Non renseignée", icon: Briefcase },
+                        ].map((item) => {
+                          const Icon = item.icon;
+                          return (
+                            <div key={item.label} className="flex items-center gap-3 rounded-2xl bg-[#F8FAFC] p-4 dark:bg-muted/40">
+                              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-[#64748B] shadow-sm dark:bg-card dark:text-muted-foreground">
+                                <Icon className="h-5 w-5" />
+                              </div>
+                              <div>
+                                <p className="text-xs text-[#64748B] dark:text-muted-foreground">{item.label}</p>
+                                <p className="text-sm font-medium text-[#0F172A] dark:text-foreground">{item.value}</p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className={`${ui.card} rounded-[24px] border border-[#EEF2F7] p-6 dark:border-border`}>
+                      <h3 className="text-lg font-semibold text-[#0F172A] dark:text-foreground">Réponse admin</h3>
+                      <div className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
+                        <div className="space-y-2">
+                          <label className="text-xs font-medium text-[#64748B] dark:text-muted-foreground">Statut de la demande</label>
+                          <select
+                            className={`${ui.input} w-full`}
+                            value={selectedRequestStatus || selectedRequest.status}
+                            onChange={(event) => {
+                              setSelectedRequestStatus(event.target.value);
+                              setRequestStatusMessage(null);
+                            }}
+                          >
+                            <option value="new">Nouvelle</option>
+                            <option value="in_progress">En cours</option>
+                            <option value="quote_sent">Devis envoyé</option>
+                            <option value="closed">Clôturée</option>
+                          </select>
+                        </div>
+                        <div className="flex items-end">
+                          <button
+                            type="button"
+                            onClick={() => void handleRequestStatusUpdate()}
+                            disabled={requestStatusSaving || selectedRequestStatus === selectedRequest.status}
+                            className={`${ui.btnPrimary} w-full disabled:cursor-not-allowed disabled:opacity-60 md:w-auto`}
+                          >
+                            {requestStatusSaving ? "Mise à jour..." : "Enregistrer le statut"}
+                          </button>
+                        </div>
+                      </div>
+                      {requestStatusMessage && (
+                        <p className={`mt-3 rounded-lg px-3 py-2 text-sm ${
+                          requestStatusMessage.includes("succès")
+                            ? "bg-green-50 text-[#16A34A] dark:bg-green-950/30"
+                            : "bg-red-50 text-[#EF4444] dark:bg-red-950/30"
+                        }`}>
+                          {requestStatusMessage}
+                        </p>
+                      )}
+                      <div className="mt-4 grid gap-4 md:grid-cols-2">
+                        <select className={ui.input} defaultValue={selectedRequest.priority}>
+                          <option value="low">Basse</option>
+                          <option value="medium">Moyenne</option>
+                          <option value="high">Haute</option>
+                        </select>
+                      </div>
+                      <textarea
+                        rows={5}
+                        className={`${ui.input} mt-4 w-full resize-none`}
+                        placeholder="Rédigez votre réponse au client..."
+                      />
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <button type="button" className={ui.btnPrimary}>
+                          <Send className="h-4 w-4" />
+                          Envoyer la réponse
+                        </button>
+                        <button type="button" className={ui.btnSecondary}>Brouillon</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className={`${ui.card} h-fit rounded-[24px] border border-[#EEF2F7] p-6 dark:border-border`}>
+                    <h3 className="text-lg font-semibold text-[#0F172A] dark:text-foreground">Suivi de la demande</h3>
+                    <div className="mt-6 space-y-6">
+                      {[
+                        { label: "Demande soumise", date: selectedRequest.date, done: true },
+                        { label: "En cours de révision", date: "En cours", done: true, active: true },
+                        { label: "Préparation du devis", date: "À venir", done: false },
+                        { label: "Réponse envoyée", date: "À venir", done: false },
+                      ].map((step, index, stepsList) => (
+                        <div key={step.label} className="relative flex gap-4">
+                          {index < stepsList.length - 1 && (
+                            <span className={`absolute left-4 top-9 h-full w-px ${step.done ? "bg-green-200 dark:bg-green-900" : "bg-[#E2E8F0] dark:bg-border"}`} />
+                          )}
+                          <span className={`relative z-10 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full ${step.done ? "bg-green-500 text-white" : "bg-[#F1F5F9] text-[#94A3B8] dark:bg-muted"}`}>
+                            {step.done ? <CheckCircle className="h-5 w-5" /> : <AlertCircle className="h-4 w-4" />}
+                          </span>
+                          <div className="pb-1">
+                            <p className={`text-sm font-medium ${step.active ? "text-[#2563EB]" : "text-[#0F172A] dark:text-foreground"}`}>{step.label}</p>
+                            <p className="mt-0.5 text-xs text-[#64748B] dark:text-muted-foreground">{step.date}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </section>
+              </div>
+            ) : (
+            <div className={`${ui.card} overflow-hidden`}>
+              <div className="px-6 py-6">
+                <div className="flex flex-col gap-4 md:flex-row md:items-center">
                   <div className="relative flex-1">
-                    <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <Search className="absolute left-3.5 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-[#94A3B8]" />
                     <input
                       type="text"
                       placeholder="Rechercher une demande, un client ou un service..."
-                      className="w-full pl-10 pr-4 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-300 transition-all"
+                      value={requestSearch}
+                      onChange={(event) => setRequestSearch(event.target.value)}
+                      className={`${ui.input} w-full pl-10`}
                     />
                   </div>
-                  <div className="flex gap-2 flex-wrap">
-                    <select className="px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/30">
+                  <div className="flex flex-wrap gap-2">
+                    <select
+                      className={`${ui.input} !w-auto`}
+                      value={requestStatusFilter}
+                      onChange={(event) => setRequestStatusFilter(event.target.value)}
+                    >
                       <option value="">Statut</option>
                       <option value="new">Nouvelle</option>
                       <option value="in_progress">En cours</option>
@@ -959,14 +1518,18 @@ export default function AdminDashboard() {
                       <option value="completed">Traitée</option>
                       <option value="closed">Clôturée</option>
                     </select>
-                    <select className="px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/30">
+                    <select
+                      className={`${ui.input} !w-auto`}
+                      value={requestPriorityFilter}
+                      onChange={(event) => setRequestPriorityFilter(event.target.value)}
+                    >
                       <option value="">Priorité</option>
                       <option value="high">Haute</option>
                       <option value="medium">Moyenne</option>
                       <option value="low">Basse</option>
                     </select>
-                    <button className="flex items-center gap-2 px-3 py-2.5 text-sm font-medium text-slate-700 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors">
-                      <Download className="w-4 h-4" />
+                    <button type="button" onClick={() => exportRequestsToCsv(filteredRequests)} className={ui.btnSecondary}>
+                      <Download className="h-4 w-4" />
                       Exporter
                     </button>
                   </div>
@@ -975,195 +1538,438 @@ export default function AdminDashboard() {
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead>
-                    <tr className="border-b border-slate-100 bg-slate-50/50">
-                      <th className="px-6 py-3.5 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">ID</th>
-                      <th className="px-6 py-3.5 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Client</th>
-                      <th className="px-6 py-3.5 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Type de projet</th>
-                      <th className="px-6 py-3.5 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Budget</th>
-                      <th className="px-6 py-3.5 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Statut</th>
-                      <th className="px-6 py-3.5 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Priorité</th>
-                      <th className="px-6 py-3.5 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Date</th>
-                      <th className="px-6 py-3.5 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Action</th>
+                    <tr>
+                      <th className={ui.tableHead}>ID</th>
+                      <th className={ui.tableHead}>Client</th>
+                      <th className={ui.tableHead}>Type de projet</th>
+                      <th className={ui.tableHead}>Budget</th>
+                      <th className={ui.tableHead}>Statut</th>
+                      <th className={ui.tableHead}>Priorité</th>
+                      <th className={ui.tableHead}>Date</th>
+                      <th className={ui.tableHead}>Action</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {requests.map((req) => (
-                      <tr key={req.id} className="hover:bg-slate-50/60 transition-colors">
+                  <tbody>
+                    {filteredRequests.map((req) => (
+                      <tr key={req.id} className={ui.tableRow}>
                         <td className="px-6 py-4">
-                          <span className="text-xs font-mono text-slate-500">{req.id}</span>
+                          <span className="text-xs font-medium text-[#64748B]">{req.id}</span>
                         </td>
                         <td className="px-6 py-4">
-                          <p className="text-sm font-medium text-slate-900">{req.client}</p>
-                          <p className="text-xs text-slate-400">{req.email}</p>
+                          <p className="text-sm font-medium text-[#0F172A]">{req.client}</p>
+                          <p className="text-xs text-[#64748B]">{req.email}</p>
                         </td>
-                        <td className="px-6 py-4 text-sm text-slate-700">{req.type}</td>
+                        <td className="px-6 py-4 text-sm text-[#64748B]">{req.type}</td>
                         <td className="px-6 py-4">
-                          <span className="text-sm font-semibold text-slate-800" style={{ fontFamily: "'DM Mono', monospace" }}>{req.budget}</span>
+                          <span className="text-sm font-medium text-[#0F172A]">{req.budget}</span>
                         </td>
                         <td className="px-6 py-4"><StatusBadge status={req.status} /></td>
                         <td className="px-6 py-4"><PriorityBadge priority={req.priority} /></td>
-                        <td className="px-6 py-4 text-xs text-slate-500">{new Date(req.date).toLocaleDateString("fr-FR")}</td>
+                        <td className="px-6 py-4 text-xs text-[#64748B]">{new Date(req.date).toLocaleDateString("fr-FR")}</td>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-1">
-                            <Link to={`/request/${req.id}`} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Voir détails">
-                              <Eye className="w-4 h-4" />
-                            </Link>
-                            <button className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors" title="Modifier">
-                              <Edit className="w-4 h-4" />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedRequest(req);
+                                setSelectedRequestStatus(req.status);
+                                setRequestStatusMessage(null);
+                              }}
+                              className={`${ui.btnGhost} !p-2 !text-[#2563EB]`}
+                              title="Voir détails"
+                            >
+                              <Eye className="h-4 w-4" />
                             </button>
-                            <button className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors" title="Répondre">
-                              <Send className="w-4 h-4" />
+                            <button className={`${ui.btnGhost} !p-2`} title="Modifier">
+                              <Edit className="h-4 w-4" />
+                            </button>
+                            <button className={`${ui.btnGhost} !p-2`} title="Répondre">
+                              <Send className="h-4 w-4" />
                             </button>
                           </div>
                         </td>
                       </tr>
                     ))}
+                    {filteredRequests.length === 0 && (
+                      <tr>
+                        <td colSpan={8} className="px-6 py-12 text-center">
+                          <p className="text-sm font-medium text-[#0F172A] dark:text-foreground">Aucune demande trouvée</p>
+                          <p className="mt-1 text-xs text-[#64748B] dark:text-muted-foreground">Essayez de modifier la recherche ou les filtres.</p>
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
-              <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between">
-                <p className="text-xs text-slate-500">Affichage de 6 sur <strong className="text-slate-700">124</strong> demandes</p>
+              <div className="flex items-center justify-between px-6 py-5">
+                <p className="text-xs text-[#64748B] dark:text-muted-foreground">
+                  Affichage de {filteredRequests.length} sur <strong className="text-[#0F172A] dark:text-foreground">{scoredRequests.length}</strong> demandes
+                </p>
                 <div className="flex gap-2">
-                  <button className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">Précédent</button>
-                  <button className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Suivant</button>
+                  <button className={ui.btnSecondary}>Précédent</button>
+                  <button className={ui.btnPrimary}>Suivant</button>
                 </div>
               </div>
             </div>
+            )
           )}
 
           {/* ════════ MESSAGES TAB ════════ */}
           {activeTab === "messages" && (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-              <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+            selectedContact ? (
+              <div className="space-y-6">
+                <button
+                  type="button"
+                  onClick={() => setSelectedContactId(null)}
+                  className={`${ui.btnGhost} !px-0 hover:!bg-transparent`}
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Retour aux messages
+                </button>
+
+                <section className={`${ui.card} rounded-[24px] border border-[#EEF2F7] p-6 dark:border-border`}>
+                  <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-[#64748B] dark:text-muted-foreground">
+                        {toDate(selectedContact.createdAt)?.toLocaleString("fr-FR")}
+                      </p>
+                      <h2 className="mt-2 text-2xl font-semibold tracking-tight text-[#0F172A] dark:text-foreground">
+                        {selectedContact.subject || "Message de contact"}
+                      </h2>
+                      <p className="mt-1 text-sm text-[#64748B] dark:text-muted-foreground">
+                        {selectedContact.fullName} · {selectedContact.email}
+                      </p>
+                    </div>
+                    <span className={`rounded-md px-2.5 py-1 text-xs font-medium ${
+                      selectedContact.status === "NON_LU"
+                        ? "bg-blue-50 text-[#2563EB]"
+                        : selectedContact.status === "REPONDU"
+                          ? "bg-green-50 text-green-700"
+                          : "bg-slate-100 text-[#64748B]"
+                    }`}>
+                      {selectedContact.status === "NON_LU" ? "Nouveau" : selectedContact.status === "REPONDU" ? "Répondu" : "Lu"}
+                    </span>
+                  </div>
+
+                  <div className="mt-6 rounded-2xl bg-[#F8FAFC] p-5 dark:bg-muted/40">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#94A3B8] dark:text-muted-foreground">Message</p>
+                    <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-[#0F172A] dark:text-foreground">
+                      {selectedContact.message}
+                    </p>
+                  </div>
+
+                  <div className="mt-4">
+                    <a
+                      href={`mailto:${selectedContact.email}?subject=${encodeURIComponent(`Re: ${selectedContact.subject || "Votre message Tema Concept"}`)}`}
+                      className={ui.btnPrimary}
+                    >
+                      <Mail className="h-4 w-4" />
+                      Répondre par email
+                    </a>
+                  </div>
+                </section>
+              </div>
+            ) : (
+            <div className={`${ui.card} overflow-hidden`}>
+              <div className="flex items-center justify-between px-6 py-6">
                 <div>
-                  <h2 className="text-sm font-semibold text-slate-900">Messages contact</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">7 messages non lus sur 42 au total</p>
+                  <h2 className="text-xl font-semibold text-[#0F172A] dark:text-foreground">Messages contact</h2>
+                  <p className="mt-1 text-sm text-[#64748B] dark:text-muted-foreground">
+                    {contactMessages.length > 0
+                      ? `${unreadContactCount} non lu${unreadContactCount > 1 ? "s" : ""} sur ${contactMessages.length} message${contactMessages.length > 1 ? "s" : ""}`
+                      : "Les messages envoyés depuis la page d'accueil apparaîtront ici."}
+                  </p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={() => void loadContacts()} className={ui.btnSecondary}>
+                    Actualiser
+                  </button>
                   <div className="relative">
-                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input placeholder="Rechercher..." className="pl-9 pr-4 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/30 w-48" />
+                    <Search className="absolute left-3.5 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-[#94A3B8]" />
+                    <input
+                      value={contactSearch}
+                      onChange={(event) => setContactSearch(event.target.value)}
+                      placeholder="Rechercher..."
+                      className={`${ui.input} w-48 pl-10`}
+                    />
                   </div>
                 </div>
               </div>
-              <div className="divide-y divide-slate-50">
-                {recentMessages.map((msg, i) => (
-                  <div key={i} className={`flex items-start gap-4 px-6 py-4 hover:bg-slate-50/60 cursor-pointer transition-colors ${!msg.read ? "bg-blue-50/30" : ""}`}>
-                    <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                      <span className="text-xs font-bold text-blue-700">{msg.initials}</span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-0.5">
-                        <p className={`text-sm ${!msg.read ? "font-semibold text-slate-900" : "font-medium text-slate-700"}`}>{msg.from}</p>
-                        {!msg.read && <span className="text-[10px] font-semibold text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded-full">Nouveau</span>}
-                        <span className="ml-auto text-xs text-slate-400">{msg.date}</span>
-                      </div>
-                      <p className={`text-sm truncate ${!msg.read ? "text-slate-700" : "text-slate-500"}`}>{msg.subject}</p>
-                    </div>
+
+              {contactsError && (
+                <div className="mx-6 mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300">
+                  {contactsError}
+                </div>
+              )}
+
+              <div>
+                {contactsLoading ? (
+                  <div className="px-6 py-8 text-sm text-[#64748B] dark:text-muted-foreground">
+                    Chargement des messages...
                   </div>
-                ))}
+                ) : filteredContactMessages.length === 0 ? (
+                  <div className="px-6 py-8 text-sm text-[#64748B] dark:text-muted-foreground">
+                    Aucun message de contact pour le moment.
+                  </div>
+                ) : (
+                  filteredContactMessages.map((msg) => {
+                    const isUnread = msg.status === "NON_LU";
+                    const initials = getClientInitials(msg.fullName);
+                    const preview = msg.subject || msg.message.slice(0, 80);
+
+                    return (
+                      <button
+                        key={msg.id}
+                        type="button"
+                        onClick={() => void handleOpenContact(msg.id)}
+                        className={`flex w-full cursor-pointer items-start gap-4 px-6 py-5 text-left transition-colors duration-150 hover:bg-[#F8FAFC] dark:hover:bg-muted/40 ${isUnread ? "bg-blue-50/40 dark:bg-blue-950/20" : ""}`}
+                      >
+                        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-blue-50 dark:bg-blue-950/40">
+                          <span className="text-xs font-semibold text-[#2563EB]">{initials}</span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="mb-0.5 flex items-center gap-2">
+                            <p className={`text-sm ${isUnread ? "font-semibold text-[#0F172A] dark:text-foreground" : "font-medium text-[#64748B] dark:text-muted-foreground"}`}>
+                              {msg.fullName}
+                            </p>
+                            {isUnread && (
+                              <span className="rounded-md bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-[#2563EB] dark:bg-blue-950/40">
+                                Nouveau
+                              </span>
+                            )}
+                            <span className="ml-auto text-xs text-[#94A3B8]">
+                              {formatRelativeTime(toDate(msg.createdAt))}
+                            </span>
+                          </div>
+                          <p className="truncate text-xs text-[#94A3B8] dark:text-muted-foreground">{msg.email}</p>
+                          <p className={`mt-1 truncate text-sm ${isUnread ? "text-[#0F172A] dark:text-foreground" : "text-[#64748B] dark:text-muted-foreground"}`}>
+                            {preview}
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
               </div>
             </div>
+            )
           )}
 
           {/* ════════ CONVERSATIONS TAB ════════ */}
           {activeTab === "conversations" && (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-              <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
-                <div>
-                  <h2 className="text-sm font-semibold text-slate-900">Conversations IA récentes</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">Analyser les échanges avec l'assistant intelligent</p>
-                </div>
-                <div className="flex gap-2">
-                  <div className="relative">
-                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input placeholder="Rechercher..." className="pl-9 pr-4 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/30 w-48" />
+            conversationDetailsOpen && selectedConversation ? (
+              <div className="space-y-6">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConversationDetailsOpen(false);
+                    setManualResponse("");
+                  }}
+                  className={`${ui.btnGhost} !px-0 hover:!bg-transparent`}
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Retour aux conversations
+                </button>
+
+                <section className={`${ui.card} rounded-[24px] border border-[#EEF2F7] p-6 dark:border-border`}>
+                  <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-[#64748B] dark:text-muted-foreground">{selectedConversation.date}</p>
+                      <h2 className="mt-2 text-2xl font-semibold tracking-tight text-[#0F172A] dark:text-foreground">{selectedConversation.subject}</h2>
+                      <p className="mt-1 text-sm text-[#64748B] dark:text-muted-foreground">{selectedConversation.user}</p>
+                    </div>
+                    <ConvBadge status={selectedConversation.status} />
                   </div>
-                </div>
+
+                  <div className="mt-6 rounded-2xl bg-[#F8FAFC] p-5 dark:bg-muted/40">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#94A3B8] dark:text-muted-foreground">Historique des messages</p>
+                    {conversationDetailLoading ? (
+                      <p className="mt-3 text-sm text-[#64748B] dark:text-muted-foreground">Chargement des messages...</p>
+                    ) : selectedConversationMessages.length === 0 ? (
+                      <p className="mt-3 text-sm text-[#64748B] dark:text-muted-foreground">Aucun message enregistré pour cette conversation.</p>
+                    ) : (
+                      <div className="mt-4 max-h-[420px] space-y-3 overflow-y-auto">
+                        {selectedConversationMessages.map((msg) => (
+                          <div
+                            key={msg.id}
+                            className={`rounded-2xl px-4 py-3 text-sm leading-6 ${
+                              msg.sender === "USER"
+                                ? "bg-white text-[#0F172A] dark:bg-card dark:text-foreground"
+                                : msg.sender === "SUPPORT"
+                                  ? "bg-violet-50 text-violet-900 dark:bg-violet-950/30 dark:text-violet-100"
+                                  : "bg-blue-50 text-blue-900 dark:bg-blue-950/30 dark:text-blue-100"
+                            }`}
+                          >
+                            <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide opacity-70">
+                              {msg.sender === "USER" ? "Client" : msg.sender === "SUPPORT" ? "Support" : "Assistant IA"}
+                              {" · "}
+                              {new Date(msg.createdAt).toLocaleString("fr-FR")}
+                            </p>
+                            <p className="whitespace-pre-wrap">{msg.content}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                <section className={`${ui.card} rounded-[24px] border border-[#EEF2F7] p-6 dark:border-border`}>
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-50 text-[#2563EB] dark:bg-blue-950/40">
+                      <Send className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-[#0F172A] dark:text-foreground">Répondre comme support</h3>
+                      <p className="text-sm text-[#64748B] dark:text-muted-foreground">Le support humain prend la main sur cette conversation.</p>
+                    </div>
+                  </div>
+
+                  <textarea
+                    rows={6}
+                    value={manualResponse}
+                    onChange={(event) => setManualResponse(event.target.value)}
+                    className={`${ui.input} mt-5 w-full resize-none`}
+                    placeholder="Écrivez votre réponse support au client..."
+                  />
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void handleHandoff(selectedConversation.id)}
+                      disabled={handoffLoading || !manualResponse.trim()}
+                      className={ui.btnPrimary}
+                    >
+                      <Send className="h-4 w-4" />
+                      {handoffLoading ? "Envoi..." : "Envoyer la réponse"}
+                    </button>
+                    <button type="button" onClick={() => setManualResponse("")} className={ui.btnSecondary}>
+                      Effacer
+                    </button>
+                  </div>
+                </section>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-slate-100 bg-slate-50/50">
-                      <th className="px-6 py-3.5 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Utilisateur</th>
-                      <th className="px-6 py-3.5 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Sujet</th>
-                      <th className="px-6 py-3.5 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Dernier message</th>
-                      <th className="px-6 py-3.5 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Messages</th>
-                      <th className="px-6 py-3.5 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Date</th>
-                      <th className="px-6 py-3.5 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Statut</th>
-                      <th className="px-6 py-3.5 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {mockConversations.map((conv) => (
-                      <tr key={conv.id} className="hover:bg-slate-50/60 transition-colors">
-                        <td className="px-6 py-4 text-sm font-medium text-slate-900">{conv.user}</td>
-                        <td className="px-6 py-4 text-sm text-slate-700">{conv.subject}</td>
-                        <td className="px-6 py-4 text-sm text-slate-500 max-w-xs truncate">{conv.lastMessage}</td>
-                        <td className="px-6 py-4">
-                          <span className="text-xs font-medium text-slate-600 bg-slate-100 px-2 py-1 rounded-full">{conv.count} msgs</span>
-                        </td>
-                        <td className="px-6 py-4 text-xs text-slate-500">{conv.date}</td>
-                        <td className="px-6 py-4"><ConvBadge status={conv.status} /></td>
-                        <td className="px-6 py-4">
-                          <button className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-1.5 rounded-lg transition-colors">
-                            <Eye className="w-3.5 h-3.5" />
-                            Voir
-                          </button>
-                        </td>
+            ) : (
+              <div className={`${ui.card} overflow-hidden`}>
+                <div className="flex items-center justify-between px-6 py-6">
+                  <div>
+                    <h2 className="text-xl font-semibold text-[#0F172A] dark:text-foreground">Conversations IA</h2>
+                    <p className="mt-1 text-sm text-[#64748B] dark:text-muted-foreground">Voir une conversation et répondre comme support.</p>
+                  </div>
+                  <button type="button" onClick={() => void loadConversations()} className={ui.btnSecondary}>
+                    Actualiser
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
+                  {conversationsError && (
+                    <div className="mx-6 mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300">
+                      {conversationsError}
+                    </div>
+                  )}
+                  <table className="w-full">
+                    <thead>
+                      <tr>
+                        <th className={ui.tableHead}>Date</th>
+                        <th className={`${ui.tableHead} text-right`}>Actions</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between">
-                <p className="text-xs text-slate-500">Affichage de 5 sur <strong className="text-slate-700">256</strong> conversations</p>
-                <div className="flex gap-2">
-                  <button className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">Précédent</button>
-                  <button className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Suivant</button>
+                    </thead>
+                    <tbody>
+                      {conversationsLoading ? (
+                        <tr>
+                          <td colSpan={2} className="px-6 py-8 text-sm text-[#64748B] dark:text-muted-foreground">
+                            Chargement des conversations...
+                          </td>
+                        </tr>
+                      ) : conversationRows.length === 0 ? (
+                        <tr>
+                          <td colSpan={2} className="px-6 py-8 text-sm text-[#64748B] dark:text-muted-foreground">
+                            Aucune conversation enregistrée pour le moment. Les messages du chatbot apparaîtront ici.
+                          </td>
+                        </tr>
+                      ) : conversationRows.map((conv) => (
+                        <tr key={conv.id} className={ui.tableRow}>
+                          <td className="px-6 py-4">
+                            <p className="text-sm font-medium text-[#0F172A] dark:text-foreground">{conv.date}</p>
+                            <div className="mt-1 flex flex-wrap items-center gap-2">
+                              <p className="max-w-xl truncate text-xs text-[#64748B] dark:text-muted-foreground">{conv.lastMessage}</p>
+                              <ConvBadge status={conv.status} />
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedConversationId(conv.id);
+                                  setConversationDetailsOpen(true);
+                                  setManualResponse("");
+                                  void loadConversationDetail(conv.id);
+                                }}
+                                className={`${ui.btnGhost} !px-2.5 !py-1.5 !text-[#2563EB] hover:!bg-blue-50 dark:hover:!bg-blue-950/30`}
+                              >
+                                <Eye className="h-4 w-4" />
+                                Voir
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedConversationId(conv.id);
+                                  setConversationDetailsOpen(true);
+                                  setManualResponse("");
+                                  void loadConversationDetail(conv.id);
+                                }}
+                                className={ui.btnPrimary}
+                              >
+                                <Send className="h-4 w-4" />
+                                Répondre support
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
-            </div>
+            )
           )}
 
           {/* ════════ SERVICES TAB ════════ */}
           {activeTab === "services" && (
-            <div className="space-y-4">
+            <div className="space-y-6">
               <div className="flex justify-end">
-                <button className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors shadow-sm">
+                <button className={ui.btnPrimary}>
                   + Ajouter un service
                 </button>
               </div>
-              <div className="grid gap-4">
+              <div className="grid gap-6">
                 {services.map((s) => (
-                  <div key={s.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 hover:border-blue-200 hover:shadow-md transition-all">
+                  <div key={s.id} className={`${ui.card} ${ui.cardHover} p-6`}>
                     <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-3 mb-2">
-                          <h3 className="text-base font-semibold text-slate-900">{s.name}</h3>
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-100">
+                      <div className="min-w-0 flex-1">
+                        <div className="mb-2 flex items-center gap-3">
+                          <h3 className="text-base font-semibold text-[#0F172A]">{s.name}</h3>
+                          <span className="inline-flex items-center rounded-md bg-green-50 px-2 py-0.5 text-[11px] font-medium text-[#22C55E]">
                             Actif
                           </span>
                         </div>
-                        <p className="text-sm text-slate-500 mb-4">{s.desc}</p>
-                        <div className="flex items-center gap-6 text-xs text-slate-500">
+                        <p className="mb-4 text-sm text-[#64748B]">{s.desc}</p>
+                        <div className="flex items-center gap-6 text-xs text-[#64748B]">
                           <span className="flex items-center gap-1.5">
-                            <FileText className="w-3.5 h-3.5 text-slate-400" />
-                            <strong className="text-slate-700">{s.requests}</strong> demandes
+                            <FileText className="h-4 w-4 text-[#94A3B8]" />
+                            <strong className="text-[#0F172A]">{s.requests}</strong> demandes
                           </span>
                           <span className="flex items-center gap-1.5">
-                            <Clock className="w-3.5 h-3.5 text-slate-400" />
+                            <Clock className="h-4 w-4 text-[#94A3B8]" />
                             Délai : {s.duration}
                           </span>
-                          <span className="text-slate-300">{s.id}</span>
+                          <span className="text-[#CBD5E1]">{s.id}</span>
                         </div>
                       </div>
-                      <div className="flex gap-2 flex-shrink-0">
-                        <button className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors">
-                          <Edit className="w-4 h-4" />
+                      <div className="flex flex-shrink-0 gap-1">
+                        <button className={`${ui.btnGhost} !p-2`}>
+                          <Edit className="h-4 w-4" />
                         </button>
-                        <button className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors">
-                          <MoreVertical className="w-4 h-4" />
+                        <button className={`${ui.btnGhost} !p-2`}>
+                          <MoreVertical className="h-4 w-4" />
                         </button>
                       </div>
                     </div>
@@ -1175,68 +1981,83 @@ export default function AdminDashboard() {
 
           {/* ════════ USERS TAB ════════ */}
           {activeTab === "users" && (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-              <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+            <div className={`${ui.card} overflow-hidden`}>
+              <div className="flex items-center justify-between px-6 py-6">
                 <div>
-                  <h2 className="text-sm font-semibold text-slate-900">Gestion des clients</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">89 clients inscrits sur la plateforme</p>
+                  <h2 className="text-xl font-semibold text-[#0F172A]">Gestion des clients</h2>
+                  <p className="mt-1 text-sm text-[#64748B]">{clientList.length} clients inscrits sur la plateforme</p>
                 </div>
                 <div className="flex gap-2">
                   <div className="relative">
-                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input placeholder="Rechercher..." className="pl-9 pr-4 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/30 w-48" />
+                    <Search className="absolute left-3.5 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-[#94A3B8]" />
+                    <input placeholder="Rechercher..." className={`${ui.input} w-48 pl-10`} />
                   </div>
-                  <button className="flex items-center gap-2 px-3 py-2 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors">
-                    <UserPlus className="w-4 h-4" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setClientMessage(null);
+                      setEditingClientId(null);
+                      setClientPanelOpen(true);
+                    }}
+                    className={ui.btnPrimary}
+                  >
+                    <UserPlus className="h-4 w-4" />
                     Ajouter
                   </button>
                 </div>
               </div>
+              {(clientMessage || clientError) && (
+                <div className="mx-6 mb-4 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 text-sm">
+                  <p className={clientError ? "text-[#EF4444]" : "text-[#22C55E]"}>
+                    {clientError ?? clientMessage}
+                  </p>
+                </div>
+              )}
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead>
-                    <tr className="border-b border-slate-100 bg-slate-50/50">
-                      <th className="px-6 py-3.5 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Client</th>
-                      <th className="px-6 py-3.5 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Contact</th>
-                      <th className="px-6 py-3.5 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Entreprise</th>
-                      <th className="px-6 py-3.5 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Statut</th>
-                      <th className="px-6 py-3.5 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Demandes</th>
-                      <th className="px-6 py-3.5 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Inscrit le</th>
-                      <th className="px-6 py-3.5 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Actions</th>
+                    <tr>
+                      <th className={ui.tableHead}>Client</th>
+                      <th className={ui.tableHead}>Contact</th>
+                      <th className={ui.tableHead}>Entreprise</th>
+                      <th className={ui.tableHead}>Statut</th>
+                      <th className={ui.tableHead}>Demandes</th>
+                      <th className={ui.tableHead}>Inscrit le</th>
+                      <th className={ui.tableHead}>Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {users.map((user) => (
-                      <tr key={user.id} className="hover:bg-slate-50/60 transition-colors">
+                  <tbody>
+                    {clientList.map((user) => (
+                      <tr key={user.id} className={ui.tableRow}>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                              <span className="text-xs font-bold text-blue-700">{user.initials}</span>
+                            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-blue-50">
+                              <span className="text-xs font-semibold text-[#2563EB]">{user.initials}</span>
                             </div>
                             <div>
-                              <p className="text-sm font-medium text-slate-900">{user.name}</p>
-                              <p className="text-xs text-slate-400">{user.id}</p>
+                              <p className="text-sm font-medium text-[#0F172A]">{user.name}</p>
+                              <p className="text-xs text-[#64748B]">{user.id}</p>
                             </div>
                           </div>
                         </td>
                         <td className="px-6 py-4">
-                          <p className="text-xs text-slate-600 flex items-center gap-1.5"><Mail className="w-3 h-3 text-slate-400" />{user.email}</p>
-                          <p className="text-xs text-slate-500 flex items-center gap-1.5 mt-1"><Phone className="w-3 h-3 text-slate-400" />{user.phone}</p>
+                          <p className="flex items-center gap-1.5 text-xs text-[#64748B]"><Mail className="h-3.5 w-3.5 text-[#94A3B8]" />{user.email}</p>
+                          <p className="mt-1 flex items-center gap-1.5 text-xs text-[#64748B]"><Phone className="h-3.5 w-3.5 text-[#94A3B8]" />{user.phone}</p>
                         </td>
-                        <td className="px-6 py-4 text-sm text-slate-700">{user.company}</td>
+                        <td className="px-6 py-4 text-sm text-[#64748B]">{user.company}</td>
                         <td className="px-6 py-4">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${user.status === "active" ? "bg-emerald-50 text-emerald-700 border border-emerald-100" : "bg-slate-100 text-slate-500"}`}>
+                          <span className={`inline-flex items-center rounded-md px-2.5 py-1 text-xs font-medium ${user.status === "active" ? "bg-green-50 text-[#22C55E]" : "bg-slate-100 text-[#64748B]"}`}>
                             {user.status === "active" ? "Actif" : "Inactif"}
                           </span>
                         </td>
                         <td className="px-6 py-4">
-                          <span className="text-sm font-semibold text-slate-800" style={{ fontFamily: "'DM Mono', monospace" }}>{user.requests}</span>
+                          <span className="text-sm font-semibold text-[#0F172A]">{user.requests}</span>
                         </td>
-                        <td className="px-6 py-4 text-xs text-slate-500">{new Date(user.joined).toLocaleDateString("fr-FR")}</td>
+                        <td className="px-6 py-4 text-xs text-[#64748B]">{new Date(user.joined).toLocaleDateString("fr-FR")}</td>
                         <td className="px-6 py-4">
                           <div className="flex gap-1">
-                            <button className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"><Eye className="w-4 h-4" /></button>
-                            <button className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors"><Edit className="w-4 h-4" /></button>
+                            <button className={`${ui.btnGhost} !p-2 !text-[#2563EB]`}><Eye className="h-4 w-4" /></button>
+                            <button type="button" onClick={() => handleEditClient(user)} className={`${ui.btnGhost} !p-2`}><Edit className="h-4 w-4" /></button>
                           </div>
                         </td>
                       </tr>
@@ -1244,342 +2065,150 @@ export default function AdminDashboard() {
                   </tbody>
                 </table>
               </div>
-              <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between">
-                <p className="text-xs text-slate-500">Affichage de 4 sur <strong className="text-slate-700">89</strong> clients</p>
+              <div className="flex items-center justify-between px-6 py-5">
+                <p className="text-xs text-[#64748B]">Affichage de <strong className="text-[#0F172A]">{clientList.length}</strong> clients</p>
                 <div className="flex gap-2">
-                  <button className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">Précédent</button>
-                  <button className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Suivant</button>
+                  <button className={ui.btnSecondary}>Précédent</button>
+                  <button className={ui.btnPrimary}>Suivant</button>
                 </div>
               </div>
             </div>
           )}
 
-          {/* ════════ SETTINGS TAB ════════ */}
-          {activeTab === "settings" && (
-            <div className="space-y-6">
-              <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 md:p-8">
-                <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+          {clientPanelOpen && (
+            <>
+              <div
+                className="fixed inset-0 z-40 bg-[#0F172A]/20 backdrop-blur-sm transition-opacity"
+                onClick={() => {
+                  setClientPanelOpen(false);
+                  resetClientForm();
+                }}
+              />
+              <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col bg-white shadow-2xl transition-transform duration-250 dark:bg-[#111827]">
+                <div className="flex items-center justify-between border-b border-[#F1F5F9] px-6 py-5 dark:border-border">
                   <div>
-                    <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 mb-3">
-                      <Settings className="w-3.5 h-3.5" />
-                      Paramètres
-                    </div>
-                    <h3 className="text-2xl font-semibold text-slate-900">Paramètres</h3>
-                    <p className="text-sm text-slate-500 mt-2">Gérez la configuration générale de la plateforme Tema Concept.</p>
+                    <h2 className="text-lg font-semibold text-[#0F172A] dark:text-foreground">
+                      {editingClientId ? "Modifier le client" : "Ajouter un client"}
+                    </h2>
+                    <p className="text-sm text-[#64748B] dark:text-muted-foreground">
+                      {editingClientId ? "Mettez à jour les informations du client" : "Remplissez les informations du client"}
+                    </p>
                   </div>
                   <button
+                    type="button"
                     onClick={() => {
-                      void saveCurrentSetting();
+                      setClientPanelOpen(false);
+                      resetClientForm();
                     }}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700 transition-colors"
+                    className={ui.btnGhost}
                   >
-                    <Sparkles className="w-4 h-4" />
-                    Enregistrer les changements
+                    <X className="h-5 w-5" />
                   </button>
                 </div>
-              </div>
 
-              <div className="rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm text-blue-700">
-                {settingsMessage}
-              </div>
-
-              <div className="grid gap-4 xl:grid-cols-2">
-                {settingsSections.map(({ title, description, icon: Icon, accent, details }) => (
-                  <div key={title} className="bg-white rounded-3xl border border-slate-100 shadow-sm p-5 hover:shadow-md transition-all">
-                    <div className={`inline-flex rounded-2xl bg-gradient-to-br ${accent} p-3 text-white shadow-sm`}>
-                      <Icon className="w-5 h-5" />
-                    </div>
-                    <div className="mt-4">
-                      <h4 className="text-base font-semibold text-slate-900">{title}</h4>
-                      <p className="text-sm text-slate-500 mt-1">{description}</p>
-                    </div>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {details.map((detail) => (
-                        <span key={detail} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
-                          {detail}
-                        </span>
-                      ))}
-                    </div>
-                    <button
-                      onClick={() => setSelectedSetting(selectedSetting === title ? null : title)}
-                      className="mt-5 inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3.5 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
-                    >
-                      {selectedSetting === title ? "Masquer" : "Configurer"}
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-
-              {selectedSetting && (
-                <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">Section active</p>
-                      <p className="text-sm text-slate-500">{selectedSetting}</p>
-                    </div>
-                    <button
-                      onClick={() => setSelectedSetting(null)}
-                      className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
-                    >
-                      Fermer
-                    </button>
-                  </div>
-
-                  {settingsLoading ? (
-                    <p className="mt-4 text-sm text-slate-500">Chargement des réglages…</p>
-                  ) : (
-                    <div className="mt-5 space-y-4">
-                      {selectedSetting === "Profil administrateur" && (
-                        <>
-                          <input value={settingDrafts.profile.name} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, profile: { ...prev.profile, name: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Nom de l’administrateur" />
-                          <input value={settingDrafts.profile.email} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, profile: { ...prev.profile, email: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Email de contact" />
-                          <input type="password" value={settingDrafts.profile.password} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, profile: { ...prev.profile, password: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Nouveau mot de passe" />
-                        </>
-                      )}
-                      {selectedSetting === "Informations de l’entreprise" && (
-                        <>
-                          <input value={settingDrafts.company.name} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, company: { ...prev.company, name: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Nom de l’entreprise" />
-                          <input value={settingDrafts.company.email} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, company: { ...prev.company, email: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Email de l’entreprise" />
-                          <input value={settingDrafts.company.phone} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, company: { ...prev.company, phone: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Téléphone" />
-                          <input value={settingDrafts.company.address} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, company: { ...prev.company, address: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Adresse" />
-                          <input value={settingDrafts.company.website} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, company: { ...prev.company, website: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Site web" />
-                        </>
-                      )}
-                      {selectedSetting === "Demandes de devis" && (
-                        <>
-                          <input value={settingDrafts.devis.recipientEmail} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, devis: { ...prev.devis, recipientEmail: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Email destinataire" />
-                          <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={Boolean(settingDrafts.devis.autoReply)} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, devis: { ...prev.devis, autoReply: event.target.checked } }))} /> Réponse automatique</label>
-                          <textarea value={settingDrafts.devis.message} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, devis: { ...prev.devis, message: event.target.value } }))} className="min-h-24 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Message automatique" />
-                        </>
-                      )}
-                      {selectedSetting === "Chatbot IA" && (
-                        <>
-                          <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={Boolean(settingDrafts.chatbot.enabled)} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, chatbot: { ...prev.chatbot, enabled: event.target.checked } }))} /> Activer le chatbot</label>
-                          <input value={settingDrafts.chatbot.name} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, chatbot: { ...prev.chatbot, name: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Nom du chatbot" />
-                          <input value={settingDrafts.chatbot.welcomeMessage} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, chatbot: { ...prev.chatbot, welcomeMessage: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Message d’accueil" />
-                          <select value={settingDrafts.chatbot.tone} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, chatbot: { ...prev.chatbot, tone: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm">
-                            <option value="professionnel">Professionnel</option>
-                            <option value="chaleureux">Chaleureux</option>
-                            <option value="direct">Direct</option>
-                          </select>
-                        </>
-                      )}
-                      {selectedSetting === "Notifications" && (
-                        <>
-                          <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={Boolean(settingDrafts.notifications.devis)} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, notifications: { ...prev.notifications, devis: event.target.checked } }))} /> Notifications de devis</label>
-                          <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={Boolean(settingDrafts.notifications.contact)} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, notifications: { ...prev.notifications, contact: event.target.checked } }))} /> Notifications de contact</label>
-                          <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={Boolean(settingDrafts.notifications.chatbot)} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, notifications: { ...prev.notifications, chatbot: event.target.checked } }))} /> Notifications chatbot</label>
-                          <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={Boolean(settingDrafts.notifications.dashboard)} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, notifications: { ...prev.notifications, dashboard: event.target.checked } }))} /> Notifications tableau de bord</label>
-                        </>
-                      )}
-                      {selectedSetting === "Sécurité" && (
-                        <>
-                          <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={Boolean(settingDrafts.security.require2FA)} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, security: { ...prev.security, require2FA: event.target.checked } }))} /> Activer la 2FA</label>
-                          <input value={settingDrafts.security.sessionTimeout} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, security: { ...prev.security, sessionTimeout: event.target.value } }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" placeholder="Délai de session (min)" />
-                          <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={Boolean(settingDrafts.security.autoLogout)} onChange={(event) => setSettingDrafts((prev) => ({ ...prev, security: { ...prev.security, autoLogout: event.target.checked } }))} /> Déconnexion automatique</label>
-                        </>
-                      )}
-                      <button onClick={() => { void saveCurrentSetting(); }} className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700">Enregistrer cette section</button>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-                  <div>
-                    <h3 className="text-xl font-semibold text-slate-900">Gestion des administrateurs</h3>
-                    <p className="text-sm text-slate-500 mt-2">Ajoutez, modifiez ou supprimez les accès administrateurs directement depuis la plateforme.</p>
-                  </div>
-                </div>
-
-                <div className="mt-6 grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-                  <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-sm font-semibold text-slate-900">Liste des administrateurs</h4>
-                      <span className="text-xs text-slate-500">{admins.length} comptes</span>
-                    </div>
-                    {adminLoading ? (
-                      <p className="mt-4 text-sm text-slate-500">Chargement…</p>
-                    ) : (
-                      <div className="mt-4 space-y-3">
-                        {admins.map((admin) => (
-                          <div key={admin.id} className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                            <div>
-                              <p className="text-sm font-semibold text-slate-900">{admin.name}</p>
-                              <p className="text-xs text-slate-500">{admin.email}</p>
-                              <p className="text-[11px] text-slate-400 mt-1">{admin.roleLabel || admin.role}</p>
-                            </div>
-                            <div className="flex gap-2">
-                              <button onClick={() => handleEditAdmin(admin)} className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">Modifier</button>
-                              <button onClick={() => handleDeleteAdmin(admin.id)} className="rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50">Supprimer</button>
-                            </div>
-                          </div>
-                        ))}
+                <form onSubmit={handleClientSubmit} className="flex flex-1 flex-col overflow-y-auto px-6 py-5">
+                  <div className="space-y-4">
+                    {clientError && (
+                      <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-[#EF4444]">
+                        {clientError}
                       </div>
                     )}
-                  </div>
-
-                  <form onSubmit={handleAdminSubmit} className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-sm font-semibold text-slate-900">{editingAdminId ? "Modifier un administrateur" : "Ajouter un administrateur"}</h4>
-                      {editingAdminId && (
-                        <button type="button" onClick={resetAdminForm} className="text-xs font-medium text-slate-500 hover:text-slate-700">Annuler</button>
-                      )}
-                    </div>
-
-                    {adminError && (
-                      <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{adminError}</div>
-                    )}
-                    {adminMessage && (
-                      <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-600">{adminMessage}</div>
-                    )}
-
-                    <div className="mt-4 space-y-3">
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-[#0F172A] dark:text-foreground">Nom complet</label>
                       <input
-                        value={adminForm.name}
-                        onChange={(event) => setAdminForm((prev) => ({ ...prev, name: event.target.value }))}
-                        className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400"
-                        placeholder="Nom complet"
                         required
+                        className={`${ui.input} w-full`}
+                        value={clientForm.name}
+                        onChange={(event) => setClientForm((previous) => ({ ...previous, name: event.target.value }))}
+                        placeholder="Ex. Ahmed Benali"
                       />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-[#0F172A] dark:text-foreground">Email</label>
                       <input
+                        required
                         type="email"
-                        value={adminForm.email}
-                        onChange={(event) => setAdminForm((prev) => ({ ...prev, email: event.target.value }))}
-                        className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400"
-                        placeholder="Email"
-                        required
+                        className={`${ui.input} w-full`}
+                        value={clientForm.email}
+                        onChange={(event) => setClientForm((previous) => ({ ...previous, email: event.target.value }))}
+                        placeholder="client@email.com"
                       />
-                      <input
-                        type="password"
-                        value={adminForm.password}
-                        onChange={(event) => setAdminForm((prev) => ({ ...prev, password: event.target.value }))}
-                        className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400"
-                        placeholder={editingAdminId ? "Nouveau mot de passe (optionnel)" : "Mot de passe"}
-                      />
-                      <input
-                        type="password"
-                        value={adminForm.confirmPassword}
-                        onChange={(event) => setAdminForm((prev) => ({ ...prev, confirmPassword: event.target.value }))}
-                        className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400"
-                        placeholder={editingAdminId ? "Confirmation du nouveau mot de passe" : "Confirmer le mot de passe"}
-                      />
-                      <select
-                        value={adminForm.role}
-                        onChange={(event) => setAdminForm((prev) => ({ ...prev, role: event.target.value }))}
-                        className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400"
-                      >
-                        <option value="SUPER_ADMIN">Admin principal</option>
-                        <option value="ADMIN">Admin simple</option>
-                        <option value="SUPPORT">Agent support</option>
-                      </select>
-                      <label className="flex items-center gap-2 text-sm text-slate-600">
-                        <input
-                          type="checkbox"
-                          checked={adminForm.isActive}
-                          onChange={(event) => setAdminForm((prev) => ({ ...prev, isActive: event.target.checked }))}
-                        />
-                        Compte actif
-                      </label>
                     </div>
-
-                    <button type="submit" className="mt-4 inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700">
-                      {editingAdminId ? "Mettre à jour" : "Ajouter l’administrateur"}
-                    </button>
-                  </form>
-                </div>
-              </div>
-
-              <div className="rounded-3xl border border-blue-100 bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900 p-6 md:p-8 text-white shadow-sm">
-                <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-                  <div>
-                    <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-blue-100 mb-3">
-                      <BadgeCheck className="w-3.5 h-3.5" />
-                      Important
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-[#0F172A] dark:text-foreground">Téléphone</label>
+                      <input
+                        className={`${ui.input} w-full`}
+                        value={clientForm.phone}
+                        onChange={(event) => setClientForm((previous) => ({ ...previous, phone: event.target.value }))}
+                        placeholder="+212 6 00 00 00 00"
+                      />
                     </div>
-                    <h3 className="text-xl font-semibold">Gestion des réponses humaines</h3>
-                    <p className="text-sm text-slate-300 mt-2">L’agent peut reprendre une conversation, désactiver le chatbot et répondre manuellement au client.</p>
-                    <p className="mt-2 text-xs text-blue-100">{settingsCount} réglages chargés depuis la base de données · Chatbot {chatbotStatusLabel}</p>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setChatbotEnabled(false)}
-                      className="rounded-xl border border-white/20 bg-white/10 px-3.5 py-2 text-sm font-medium text-white hover:bg-white/20 transition-colors"
-                    >
-                      Désactiver le chatbot
-                    </button>
-                    <button
-                      onClick={() => setChatbotEnabled(true)}
-                      className="rounded-xl bg-blue-500 px-3.5 py-2 text-sm font-medium text-white hover:bg-blue-400 transition-colors"
-                    >
-                      Réactiver le chatbot
-                    </button>
-                  </div>
-                </div>
-
-                <div className="mt-6 grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-                  <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur-sm">
-                    <div className="mb-3 flex items-center justify-between">
-                      <p className="text-sm font-semibold text-white">Conversations réelles</p>
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-[#0F172A] dark:text-foreground">Entreprise</label>
+                      <input
+                        className={`${ui.input} w-full`}
+                        value={clientForm.company}
+                        onChange={(event) => setClientForm((previous) => ({ ...previous, company: event.target.value }))}
+                        placeholder="Nom de l'entreprise"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-[#0F172A] dark:text-foreground">Statut</label>
                       <select
-                        value={selectedConversationId ?? ""}
-                        onChange={(event) => setSelectedConversationId(event.target.value)}
-                        className="rounded-xl border border-white/10 bg-slate-950/30 px-2.5 py-2 text-xs text-white"
+                        className={`${ui.input} w-full`}
+                        value={clientForm.status}
+                        onChange={(event) => setClientForm((previous) => ({ ...previous, status: event.target.value as ClientUser["status"] }))}
                       >
-                        {conversations.map((conversation) => (
-                          <option key={conversation.id} value={conversation.id}>{conversation.subject || conversation.id}</option>
-                        ))}
+                        <option value="active">Actif</option>
+                        <option value="inactive">Inactif</option>
                       </select>
                     </div>
-                    <div className="space-y-3">
-                      {conversations.length === 0 ? (
-                        <p className="text-sm text-slate-300">Aucune conversation n’est encore disponible. Une conversation de test sera créée automatiquement au chargement.</p>
-                      ) : conversations.map((conversation) => (
-                        <div key={conversation.id} className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-950/20 px-4 py-3">
-                          <div>
-                            <p className="text-sm font-semibold">{conversation.subject || conversation.id}</p>
-                            <p className="text-xs text-slate-300 mt-1">{conversation.lastMessage || "Aucun message"}</p>
-                          </div>
-                          <div className="text-right">
-                            <span className="inline-flex rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-medium text-slate-100">
-                              {conversation.handoff ? "Transférée" : conversation.status === "transferred" ? "Transférée" : "Active"}
-                            </span>
-                            <button onClick={() => { setSelectedConversationId(conversation.id); void handleHandoff(conversation.id); }} className="mt-2 flex items-center gap-1 text-xs font-medium text-blue-200 hover:text-white">
-                              <MessageSquareMore className="w-3.5 h-3.5" />
-                              {handoffLoading ? "Transfert..." : "Transférer"}
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
                   </div>
 
-                  <div className="rounded-2xl border border-white/10 bg-slate-950/20 p-4 backdrop-blur-sm">
-                    <div className="flex items-center gap-2 text-sm font-medium text-blue-100">
-                      <MessageCircle className="w-4 h-4" />
-                      Réponse manuelle
-                    </div>
-                    <textarea
-                      value={manualResponse}
-                      onChange={(event) => setManualResponse(event.target.value)}
-                      className="mt-4 min-h-28 w-full rounded-2xl border border-white/10 bg-white/10 px-3 py-3 text-sm text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
-                      placeholder="Rédigez la réponse à envoyer au client..."
-                    />
+                  <div className="mt-auto flex gap-2 border-t border-[#F1F5F9] pt-5 dark:border-border">
                     <button
+                      type="button"
                       onClick={() => {
-                        void handleHandoff(selectedConversationId ?? undefined);
+                        setClientPanelOpen(false);
+                        resetClientForm();
                       }}
-                      className="mt-3 inline-flex items-center gap-2 rounded-xl bg-white px-3.5 py-2 text-sm font-medium text-slate-900 hover:bg-slate-100 transition-colors"
+                      className={`${ui.btnSecondary} flex-1`}
                     >
-                      <Send className="w-4 h-4" />
-                      Envoyer
+                      Annuler
+                    </button>
+                    <button type="submit" className={`${ui.btnPrimary} flex-1`}>
+                      {editingClientId ? "Enregistrer les modifications" : "Ajouter le client"}
                     </button>
                   </div>
-                </div>
+                </form>
               </div>
-            </div>
+            </>
+          )}
+
+          {/* ════════ SETTINGS TAB ════════ */}
+          {activeTab === "settings" && (
+            <AdminSettingsPanel
+              settingDrafts={settingDrafts}
+              setSettingDrafts={setSettingDrafts}
+              settingsLoading={settingsLoading}
+              handleSettingSave={handleSettingSave}
+              chatbotEnabled={chatbotEnabled}
+              setChatbotEnabled={setChatbotEnabled}
+              admins={admins}
+              adminLoading={adminLoading}
+              adminForm={adminForm}
+              setAdminForm={setAdminForm}
+              editingAdminId={editingAdminId}
+              adminError={adminError}
+              adminMessage={adminMessage}
+              resetAdminForm={resetAdminForm}
+              handleAdminSubmit={handleAdminSubmit}
+              handleEditAdmin={handleEditAdmin}
+              handleDeleteAdmin={handleDeleteAdmin}
+              onDeactivateAdmin={handleDeactivateAdmin}
+              focusSection={settingsFocusSection}
+              focusVersion={settingsFocusVersion}
+            />
           )}
 
         </main>

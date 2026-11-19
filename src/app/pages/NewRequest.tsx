@@ -3,12 +3,23 @@ import { Link, useNavigate } from "react-router";
 import { ArrowLeft, Upload, MessageCircle, Send } from "lucide-react";
 import Header from "../components/Header";
 import FloatingChatbot from "../components/FloatingChatbot";
-import { createDevis } from "@/services/api";
+import { createDevis, getStoredClient } from "@/services/api";
+
+const toDateInputValue = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
 
 export default function NewRequest() {
   const navigate = useNavigate();
+  const storedClient = getStoredClient();
   const [showAIHelper, setShowAIHelper] = useState(false);
   const [loading, setLoading] = useState(false);
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const minDeadlineDate = toDateInputValue(tomorrow);
 
   const services = [
     "Développement Web",
@@ -22,13 +33,19 @@ export default function NewRequest() {
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
+    const desiredDeadline = (formData.get("desiredDeadline") as string) || "";
+
+    if (!desiredDeadline || desiredDeadline < minDeadlineDate) {
+      alert("Le délai souhaité doit être au minimum à J+1 (demain).");
+      return;
+    }
 
     setLoading(true);
     try {
       await createDevis({
-        fullName: formData.get("fullName") as string,
-        email: formData.get("email") as string,
-        phone: (formData.get("phone") as string) || undefined,
+        fullName: (formData.get("fullName") as string) || storedClient?.name || "",
+        email: storedClient?.email || (formData.get("email") as string),
+        phone: (formData.get("phone") as string) || storedClient?.phone || undefined,
         projectType: formData.get("projectType") as string,
         budget: (formData.get("budget") as string) || undefined,
         description: formData.get("description") as string,
@@ -43,7 +60,7 @@ export default function NewRequest() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-background">
       <Header />
       <FloatingChatbot />
 
@@ -66,7 +83,7 @@ export default function NewRequest() {
         <div className="grid lg:grid-cols-3 gap-8">
           {/* Main Form */}
           <div className="lg:col-span-2">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-8">
+            <div className="bg-white dark:bg-card rounded-xl shadow-sm border border-gray-100 dark:border-border p-8">
               <form className="space-y-6" onSubmit={handleSubmit}>
                 {/* Personal Information */}
                 <div>
@@ -80,6 +97,7 @@ export default function NewRequest() {
                         type="text"
                         name="fullName"
                         required
+                        defaultValue={storedClient?.name || ""}
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         placeholder="Votre nom complet"
                       />
@@ -93,7 +111,9 @@ export default function NewRequest() {
                         type="email"
                         name="email"
                         required
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        readOnly={Boolean(storedClient?.email)}
+                        defaultValue={storedClient?.email || ""}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent read-only:bg-gray-50 read-only:text-gray-600"
                         placeholder="votre@email.com"
                       />
                     </div>
@@ -106,6 +126,7 @@ export default function NewRequest() {
                         type="tel"
                         name="phone"
                         required
+                        defaultValue={storedClient?.phone || ""}
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         placeholder="+212 6XX-XXXXXX"
                       />
@@ -125,7 +146,7 @@ export default function NewRequest() {
                 </div>
 
                 {/* Project Details */}
-                <div className="border-t border-gray-100 pt-6">
+                <div className="border-t border-gray-100 dark:border-border pt-6">
                   <h2 className="text-lg font-semibold text-gray-900 mb-4">Détails du projet</h2>
 
                   <div className="space-y-4">
@@ -179,12 +200,18 @@ export default function NewRequest() {
 
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Délai souhaité
+                          Délai souhaité *
                         </label>
                         <input
                           type="date"
+                          name="desiredDeadline"
+                          required
+                          min={minDeadlineDate}
                           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         />
+                        <p className="text-xs text-gray-500 mt-1">
+                          La date doit être au minimum demain (J+1).
+                        </p>
                       </div>
                     </div>
 
@@ -206,7 +233,7 @@ export default function NewRequest() {
                 </div>
 
                 {/* Submit */}
-                <div className="border-t border-gray-100 pt-6 flex gap-4">
+                <div className="border-t border-gray-100 dark:border-border pt-6 flex gap-4">
                   <button
                     type="submit"
                     disabled={loading}
@@ -255,7 +282,7 @@ export default function NewRequest() {
                 </button>
               ) : (
                 <div className="space-y-3">
-                  <div className="bg-white rounded-lg p-3 text-sm text-gray-900 shadow-sm">
+                  <div className="bg-white dark:bg-card rounded-lg p-3 text-sm text-gray-900 shadow-sm">
                     Bonjour! Je peux vous aider à mieux structurer votre demande. Quel type de projet souhaitez-vous réaliser?
                   </div>
 

@@ -17,13 +17,27 @@ const authMiddleware = async (req, res, next) => {
 
     const admin = await prisma.admin.findUnique({
       where: { id: decoded.id },
-      select: { id: true, name: true, email: true, createdAt: true },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        isActive: true,
+        createdAt: true,
+      },
     });
 
     if (!admin) {
       return res.status(401).json({
         success: false,
         message: "Accès non autorisé. Administrateur introuvable.",
+      });
+    }
+
+    if (!admin.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: "Compte administrateur désactivé.",
       });
     }
 
@@ -35,6 +49,24 @@ const authMiddleware = async (req, res, next) => {
       message: "Token invalide ou expiré.",
     });
   }
+};
+
+export const requireAdminRole = (...roles) => (req, res, next) => {
+  if (!req.admin) {
+    return res.status(401).json({
+      success: false,
+      message: "Accès non autorisé.",
+    });
+  }
+
+  if (!roles.includes(req.admin.role)) {
+    return res.status(403).json({
+      success: false,
+      message: "Permissions insuffisantes.",
+    });
+  }
+
+  next();
 };
 
 export default authMiddleware;

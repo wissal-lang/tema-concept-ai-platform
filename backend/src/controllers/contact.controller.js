@@ -4,6 +4,7 @@ import {
   updateContactStatusSchema,
 } from "../validations/contact.validation.js";
 import { formatZodError } from "../utils/helpers.js";
+import { sendContactNotificationEmail } from "../services/email.service.js";
 
 export const createContact = async (req, res) => {
   try {
@@ -19,6 +20,12 @@ export const createContact = async (req, res) => {
     const contact = await prisma.contactMessage.create({
       data: parsed.data,
     });
+
+    try {
+      await sendContactNotificationEmail(contact);
+    } catch (emailError) {
+      console.error("Erreur envoi email contact:", emailError);
+    }
 
     return res.status(201).json({
       success: true,

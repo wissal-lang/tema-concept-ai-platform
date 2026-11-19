@@ -1,6 +1,18 @@
 const API_URL = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
 
 const TOKEN_KEY = "tema_admin_token";
+const CLIENT_TOKEN_KEY = "tema_client_token";
+const CLIENT_KEY = "tema_client";
+const CHAT_CONVERSATION_KEY_PREFIX = "tema_chat_conversation_id";
+
+const clearStoredChatConversations = (): void => {
+  for (let i = localStorage.length - 1; i >= 0; i -= 1) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith(CHAT_CONVERSATION_KEY_PREFIX)) {
+      localStorage.removeItem(key);
+    }
+  }
+};
 
 interface ApiResponse<T = unknown> {
   success: boolean;
@@ -24,7 +36,17 @@ interface ContactData {
   message: string;
 }
 
-interface DevisFromApi {
+export interface ContactFromApi {
+  id: string;
+  fullName: string;
+  email: string;
+  subject?: string | null;
+  message: string;
+  status: string;
+  createdAt: string;
+}
+
+export interface DevisFromApi {
   id: string;
   fullName: string;
   email: string;
@@ -36,9 +58,12 @@ interface DevisFromApi {
   createdAt: string;
 }
 
-interface ConversationFromApi {
+export interface ConversationFromApi {
   id: string;
   visitorId?: string | null;
+  clientId?: string | null;
+  clientName?: string | null;
+  clientEmail?: string | null;
   createdAt: string;
   updatedAt?: string;
   status?: string;
@@ -46,6 +71,22 @@ interface ConversationFromApi {
   messagesCount?: number;
   lastMessage?: string;
   subject?: string;
+}
+
+interface ChatMessageFromApi {
+  id: string;
+  conversationId: string;
+  sender: "USER" | "BOT" | "SUPPORT";
+  content: string;
+  createdAt: string;
+}
+
+interface ConversationDetailFromApi {
+  id: string;
+  status: string;
+  handoff: boolean;
+  messages: ChatMessageFromApi[];
+  client?: { id: string; name: string; email: string } | null;
 }
 
 interface AdminFromApi {
@@ -62,6 +103,44 @@ interface AdminFromApi {
 export const getToken = (): string | null => localStorage.getItem(TOKEN_KEY);
 export const setToken = (token: string): void => localStorage.setItem(TOKEN_KEY, token);
 export const removeToken = (): void => localStorage.removeItem(TOKEN_KEY);
+
+export interface ClientAccount {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string | null;
+  company?: string | null;
+}
+
+export const getClientToken = (): string | null => localStorage.getItem(CLIENT_TOKEN_KEY);
+export const setClientToken = (token: string): void => localStorage.setItem(CLIENT_TOKEN_KEY, token);
+export const removeClientToken = (): void => localStorage.removeItem(CLIENT_TOKEN_KEY);
+
+export const getStoredClient = (): ClientAccount | null => {
+  const raw = localStorage.getItem(CLIENT_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as ClientAccount;
+  } catch {
+    return null;
+  }
+};
+export const setStoredClient = (client: ClientAccount): void =>
+  localStorage.setItem(CLIENT_KEY, JSON.stringify(client));
+
+export const logoutClient = (): void => {
+  removeClientToken();
+  localStorage.removeItem(CLIENT_KEY);
+  clearStoredChatConversations();
+};
+
+const getClientAuthHeaders = (): Record<string, string> => {
+  const token = getClientToken();
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+};
 
 const getAuthHeaders = (): Record<string, string> => {
   const token = getToken();
@@ -81,22 +160,109 @@ async function handleResponse<T>(response: Response): Promise<ApiResponse<T>> {
   return data;
 }
 
-export async function loginAdmin(email: string, password: string) {
+export async function loginUser(email: string, password: string) {
   const response = await fetch(`${API_URL}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
-  const data = await handleResponse<{ token: string; admin: { id: string; name: string; email: string } }>(response);
+  const data = await handleResponse<{
+    token: string;
+    role: "admin" | "client";
+    admin?: { id: string; name: string; email: string };
+    client?: ClientAccount;
+  }>(response);
+
   if (data.data?.token) {
-    setToken(data.data.token);
+    if (data.data.role === "admin") {
+      logoutClient();
+      setToken(data.data.token);
+    } else {
+      removeToken();
+      setClientToken(data.data.token);
+      if (data.data.client) {
+        setStoredClient(data.data.client);
+      }
+    }
   }
+
   return data;
+}
+
+/** @deprecated Utiliser loginUser */
+export async function loginAdmin(email: string, password: string) {
+  return loginUser(email, password);
 }
 
 export async function getMe() {
   const response = await fetch(`${API_URL}/auth/me`, {
     headers: getAuthHeaders(),
+  });
+  return handleResponse(response);
+}
+
+export async function registerClient(payload: {
+  name: string;
+  email: string;
+  phone?: string;
+  company?: string;
+  password: string;
+  confirmPassword: string;
+}) {
+  const response = await fetch(`${API_URL}/auth/client/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await handleResponse<{ token: string; client: ClientAccount }>(response);
+  if (data.data?.token) {
+    removeToken();
+    setClientToken(data.data.token);
+    setStoredClient(data.data.client);
+  }
+  return data;
+}
+
+export async function loginClient(email: string, password: string) {
+  const response = await fetch(`${API_URL}/auth/client/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  const data = await handleResponse<{ token: string; client: ClientAccount }>(response);
+  if (data.data?.token) {
+    removeToken();
+    setClientToken(data.data.token);
+    setStoredClient(data.data.client);
+  }
+  return data;
+}
+
+export async function getClientMe() {
+  const response = await fetch(`${API_URL}/auth/client/me`, {
+    headers: getClientAuthHeaders(),
+  });
+  return handleResponse<ClientAccount>(response);
+}
+
+export async function requestPasswordReset(email: string) {
+  const response = await fetch(`${API_URL}/auth/forgot-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  return handleResponse<{ debugResetUrl?: string }>(response);
+}
+
+export async function resetPassword(payload: {
+  token: string;
+  password: string;
+  confirmPassword: string;
+}) {
+  const response = await fetch(`${API_URL}/auth/reset-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
   });
   return handleResponse(response);
 }
@@ -163,9 +329,16 @@ export async function getDevisList() {
   return handleResponse<DevisFromApi[]>(response);
 }
 
+export async function getMyDevis() {
+  const response = await fetch(`${API_URL}/devis/mine`, {
+    headers: getClientAuthHeaders(),
+  });
+  return handleResponse<DevisFromApi[]>(response);
+}
+
 export async function getDevisById(id: string) {
   const response = await fetch(`${API_URL}/devis/${id}`);
-  return handleResponse(response);
+  return handleResponse<DevisFromApi>(response);
 }
 
 export async function updateDevisStatus(id: string, status: string) {
@@ -198,13 +371,30 @@ export async function getContactList() {
   const response = await fetch(`${API_URL}/contact`, {
     headers: getAuthHeaders(),
   });
-  return handleResponse(response);
+  return handleResponse<ContactFromApi[]>(response);
+}
+
+export async function updateContactStatus(id: string, status: "NON_LU" | "LU" | "REPONDU") {
+  const response = await fetch(`${API_URL}/contact/${id}/status`, {
+    method: "PUT",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ status }),
+  });
+  return handleResponse<ContactFromApi>(response);
 }
 
 export async function getServices() {
   const response = await fetch(`${API_URL}/services`);
   return handleResponse<{ title: string; description: string; id: string }[]>(response);
 }
+
+const getChatHeaders = (): Record<string, string> => {
+  const token = getClientToken() || getToken();
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+};
 
 export async function sendChatMessage(
   message: string,
@@ -213,10 +403,25 @@ export async function sendChatMessage(
 ) {
   const response = await fetch(`${API_URL}/chat`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getChatHeaders(),
     body: JSON.stringify({ message, conversationId, visitorId }),
   });
-  return handleResponse<{ conversationId: string; reply: string }>(response);
+  return handleResponse<{
+    conversationId: string;
+    reply: string | null;
+    handoff?: boolean;
+    status?: string;
+    supportReason?: string;
+    awaitingSupport?: boolean;
+    messages?: ChatMessageFromApi[];
+  }>(response);
+}
+
+export async function getClientConversations() {
+  const response = await fetch(`${API_URL}/chat/client/conversations`, {
+    headers: getClientAuthHeaders(),
+  });
+  return handleResponse<ConversationFromApi[]>(response);
 }
 
 export async function getConversations() {
@@ -227,14 +432,25 @@ export async function getConversations() {
 }
 
 export async function getConversationById(id: string) {
-  const response = await fetch(`${API_URL}/chat/conversations/${id}`);
-  return handleResponse(response);
+  const response = await fetch(`${API_URL}/chat/conversations/${id}`, {
+    headers: getChatHeaders(),
+  });
+  return handleResponse<ConversationDetailFromApi>(response);
 }
 
 export async function handoffConversation(id: string, message?: string) {
   const response = await fetch(`${API_URL}/chat/conversations/${id}/handoff`, {
     method: "POST",
     headers: getAuthHeaders(),
+    body: JSON.stringify({ message }),
+  });
+  return handleResponse<{ id: string; handoff: boolean; status: string }>(response);
+}
+
+export async function requestConversationSupport(id: string, message?: string) {
+  const response = await fetch(`${API_URL}/chat/conversations/${id}/support-request`, {
+    method: "POST",
+    headers: getClientAuthHeaders(),
     body: JSON.stringify({ message }),
   });
   return handleResponse<{ id: string; handoff: boolean; status: string }>(response);
@@ -247,13 +463,52 @@ export async function getSettings() {
   return handleResponse<Record<string, unknown>>(response);
 }
 
+export async function getSettingsMeta() {
+  const response = await fetch(`${API_URL}/settings/meta`, {
+    headers: getAuthHeaders(),
+  });
+  return handleResponse(response);
+}
+
+export async function getSettingByKey(key: string) {
+  const response = await fetch(`${API_URL}/settings/${encodeURIComponent(key)}`, {
+    headers: getAuthHeaders(),
+  });
+  return handleResponse<{ key: string; value: unknown }>(response);
+}
+
 export async function updateSetting(key: string, value: unknown) {
-  const response = await fetch(`${API_URL}/settings/${key}`, {
+  const response = await fetch(`${API_URL}/settings/${encodeURIComponent(key)}`, {
     method: "PUT",
     headers: getAuthHeaders(),
     body: JSON.stringify({ value }),
   });
   return handleResponse(response);
+}
+
+export async function updateSettings(values: Record<string, unknown>) {
+  const response = await fetch(`${API_URL}/settings`, {
+    method: "PATCH",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(values),
+  });
+  return handleResponse<Record<string, unknown>>(response);
+}
+
+export async function resetSetting(key: string) {
+  const response = await fetch(`${API_URL}/settings/${encodeURIComponent(key)}`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+  return handleResponse(response);
+}
+
+export async function resetAllSettings() {
+  const response = await fetch(`${API_URL}/settings/reset`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+  });
+  return handleResponse<Record<string, unknown>>(response);
 }
 
 export function mapDevisStatus(status: string): string {

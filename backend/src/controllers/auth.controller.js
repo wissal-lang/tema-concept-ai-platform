@@ -1,7 +1,11 @@
 import bcrypt from "bcryptjs";
 import prisma from "../config/prisma.js";
 import generateToken from "../utils/generateToken.js";
-import { loginSchema } from "../validations/auth.validation.js";
+import {
+  loginSchema,
+  clientRegisterSchema,
+  clientLoginSchema,
+} from "../validations/auth.validation.js";
 import { formatZodError } from "../utils/helpers.js";
 
 const ADMIN_ROLE_LABELS = {
@@ -9,6 +13,14 @@ const ADMIN_ROLE_LABELS = {
   ADMIN: "Admin simple",
   SUPPORT: "Agent support",
 };
+
+const buildClientResponse = (client) => ({
+  id: client.id,
+  name: client.name,
+  email: client.email,
+  phone: client.phone,
+  company: client.company,
+});
 
 export const login = async (req, res) => {
   try {
@@ -22,38 +34,79 @@ export const login = async (req, res) => {
     }
 
     const { email, password } = parsed.data;
+    const normalizedEmail = email.toLowerCase();
 
-    const admin = await prisma.admin.findUnique({ where: { email } });
+    const admin = await prisma.admin.findUnique({ where: { email: normalizedEmail } });
 
-    if (!admin) {
-      return res.status(401).json({
-        success: false,
-        message: "Email ou mot de passe incorrect.",
-      });
-    }
+    if (admin) {
+      if (!admin.isActive) {
+        return res.status(403).json({
+          success: false,
+          message: "Ce compte est désactivé.",
+        });
+      }
 
-    const isPasswordValid = await bcrypt.compare(password, admin.password);
+      const isPasswordValid = await bcrypt.compare(password, admin.password);
 
-    if (!isPasswordValid) {
-      return res.status(401).json({
-        success: false,
-        message: "Email ou mot de passe incorrect.",
-      });
-    }
+      if (!isPasswordValid) {
+        return res.status(401).json({
+          success: false,
+          message: "Email ou mot de passe incorrect.",
+        });
+      }
 
-    const token = generateToken(admin.id);
+      const token = generateToken(admin.id, "admin");
 
-    return res.status(200).json({
-      success: true,
-      message: "Connexion réussie.",
-      data: {
-        token,
-        admin: {
-          id: admin.id,
-          name: admin.name,
-          email: admin.email,
+      return res.status(200).json({
+        success: true,
+        message: "Connexion réussie.",
+        data: {
+          token,
+          role: "admin",
+          admin: {
+            id: admin.id,
+            name: admin.name,
+            email: admin.email,
+          },
         },
-      },
+      });
+    }
+
+    const client = await prisma.client.findUnique({ where: { email: normalizedEmail } });
+
+    if (client) {
+      if (!client.isActive) {
+        return res.status(403).json({
+          success: false,
+          message: "Ce compte est désactivé.",
+        });
+      }
+
+      const isPasswordValid = await bcrypt.compare(password, client.password);
+
+      if (!isPasswordValid) {
+        return res.status(401).json({
+          success: false,
+          message: "Email ou mot de passe incorrect.",
+        });
+      }
+
+      const token = generateToken(client.id, "client");
+
+      return res.status(200).json({
+        success: true,
+        message: "Connexion réussie.",
+        data: {
+          token,
+          role: "client",
+          client: buildClientResponse(client),
+        },
+      });
+    }
+
+    return res.status(401).json({
+      success: false,
+      message: "Email ou mot de passe incorrect.",
     });
   } catch (error) {
     console.error("Erreur login:", error);
@@ -242,4 +295,126 @@ export const deleteAdmin = async (req, res) => {
       message: "Erreur serveur lors de la suppression de l'administrateur.",
     });
   }
+};
+
+export const registerClient = async (req, res) => {
+  try {
+    const parsed = clientRegisterSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: formatZodError(parsed.error),
+      });
+    }
+
+    const { name, email, phone, company, password } = parsed.data;
+    const normalizedEmail = email.toLowerCase();
+
+    const existingClient = await prisma.client.findUnique({
+      where: { email: normalizedEmail },
+    });
+
+    if (existingClient) {
+      return res.status(409).json({
+        success: false,
+        message: "Un compte avec cet email existe déjà.",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const client = await prisma.client.create({
+      data: {
+        name,
+        email: normalizedEmail,
+        password: hashedPassword,
+        phone: phone || null,
+        company: company || null,
+      },
+    });
+
+    const token = generateToken(client.id, "client");
+
+    return res.status(201).json({
+      success: true,
+      message: "Compte créé avec succès.",
+      data: {
+        token,
+        client: buildClientResponse(client),
+      },
+    });
+  } catch (error) {
+    console.error("Erreur inscription client:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Erreur serveur lors de la création du compte.",
+    });
+  }
+};
+
+export const loginClient = async (req, res) => {
+  try {
+    const parsed = clientLoginSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: formatZodError(parsed.error),
+      });
+    }
+
+    const { email, password } = parsed.data;
+
+    const client = await prisma.client.findUnique({
+      where: { email: email.toLowerCase() },
+    });
+
+    if (!client) {
+      return res.status(401).json({
+        success: false,
+        message: "Email ou mot de passe incorrect.",
+      });
+    }
+
+    if (!client.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: "Ce compte est désactivé.",
+      });
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, client.password);
+
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        message: "Email ou mot de passe incorrect.",
+      });
+    }
+
+    const token = generateToken(client.id, "client");
+
+    return res.status(200).json({
+      success: true,
+      message: "Connexion réussie.",
+      data: {
+        token,
+        client: buildClientResponse(client),
+      },
+    });
+  } catch (error) {
+    console.error("Erreur login client:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Erreur serveur lors de la connexion.",
+    });
+  }
+};
+
+export const getClientMe = async (req, res) => {
+  return res.status(200).json({
+    success: true,
+    data: req.client,
+  });
 };

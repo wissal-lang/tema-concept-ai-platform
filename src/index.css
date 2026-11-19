@@ -117,3 +117,36 @@
     @apply bg-background text-foreground;
   }
 }
+
+@layer utilities {
+  /* Compatibility layer for older hard-coded light theme classes. */
+  .dark [class*="text-[#0F172A]"],
+  .dark [class*="text-gray-900"],
+  .dark [class*="text-gray-800"] {
+    color: var(--foreground) !important;
+  }
+
+  .dark [class*="text-[#64748B]"],
+  .dark [class*="text-[#94A3B8]"],
+  .dark [class*="text-gray-700"],
+  .dark [class*="text-gray-600"],
+  .dark [class*="text-gray-500"],
+  .dark [class*="text-gray-400"] {
+    color: var(--muted-foreground) !important;
+  }
+
+  .dark [class*="bg-white"],
+  .dark [class*="bg-gray-50"],
+  .dark [class*="bg-gray-100"] {
+    background-color: var(--card) !important;
+  }
+
+  .dark [class*="border-gray-100"],
+  .dark [class*="border-gray-200"],
+  .dark [class*="border-gray-300"],
+  .dark [class*="border-[#E2E8F0]"],
+  .dark [class*="border-[#F1F5F9]"],
+  .dark [class*="border-[#EEF2F7]"] {
+    border-color: var(--border) !important;
+  }
+}

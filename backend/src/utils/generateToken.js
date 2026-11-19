@@ -1,11 +1,11 @@
 import jwt from "jsonwebtoken";
 
-const generateToken = (adminId) => {
+const generateToken = (id, type = "admin") => {
   if (!process.env.JWT_SECRET) {
     throw new Error("JWT_SECRET n'est pas défini.");
   }
 
-  return jwt.sign({ id: adminId }, process.env.JWT_SECRET, {
+  return jwt.sign({ id, type }, process.env.JWT_SECRET, {
     expiresIn: "7d",
   });
 };

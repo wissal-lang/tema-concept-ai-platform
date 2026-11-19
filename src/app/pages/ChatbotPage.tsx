@@ -1,29 +1,38 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Link } from "react-router";
-import { Send, Bot, User, HeadphonesIcon, Plus, ChevronRight, Menu, X } from "lucide-react";
+import { Send, User, HeadphonesIcon, Plus, ChevronRight, Menu, X } from "lucide-react";
 import Header from "../components/Header";
-import { sendChatMessage } from "@/services/api";
+import TemaLogo from "../components/TemaLogo";
+import {
+  getClientConversations,
+  getClientToken,
+  getConversationById,
+  getStoredClient,
+  requestConversationSupport,
+  sendChatMessage,
+  type ConversationFromApi,
+} from "@/services/api";
 
 type Message = {
-  id: number;
-  type: "bot" | "user";
+  id: string;
+  type: "bot" | "user" | "support";
   content: string;
   timestamp: Date;
   serviceCards?: boolean;
+};
+
+const WELCOME_MESSAGE: Message = {
+  id: "welcome",
+  type: "bot",
+  content: "Bonjour ! Je suis l'assistant IA de Tema Concept. Je peux vous aider à découvrir nos services, demander un devis ou suivre une demande.",
+  timestamp: new Date(),
 };
 
 const serviceCards = [
   { title: "Sites web & plateformes web", icon: "💻" },
   { title: "Applications mobiles", icon: "📱" },
   { title: "Solutions IA", icon: "🤖" },
-  { title: "Support IT", icon: "🛠️" }
-];
-
-const conversationHistory = [
-  { id: 1, title: "Services disponibles", badge: "Information", badgeColor: "bg-blue-100 text-blue-700", date: "Aujourd'hui", active: true },
-  { id: 2, title: "Demande de devis mobile", badge: "Devis", badgeColor: "bg-green-100 text-green-700", date: "Hier", active: false },
-  { id: 3, title: "Questions sur les délais", badge: "Suivi", badgeColor: "bg-yellow-100 text-yellow-700", date: "2 juin", active: false },
-  { id: 4, title: "Support technique", badge: "Support", badgeColor: "bg-purple-100 text-purple-700", date: "1 juin", active: false }
+  { title: "Support IT", icon: "🛠️" },
 ];
 
 const suggestedQuestions = [
@@ -31,26 +40,125 @@ const suggestedQuestions = [
   "Je veux créer un site web",
   "Je veux demander un devis",
   "Comment suivre ma demande ?",
-  "Parler à un conseiller"
+  "Parler à un conseiller",
 ];
 
+const mapApiMessages = (apiMessages: Array<{ id: string; sender: string; content: string; createdAt: string }>): Message[] => {
+  if (!apiMessages.length) {
+    return [WELCOME_MESSAGE];
+  }
+
+  return apiMessages.map((msg) => ({
+    id: msg.id,
+    type: msg.sender === "USER" ? "user" : msg.sender === "SUPPORT" ? "support" : "bot",
+    content: msg.content,
+    timestamp: new Date(msg.createdAt),
+  }));
+};
+
+const formatConversationDate = (value: string) => {
+  const date = new Date(value);
+  const now = new Date();
+  const diffDays = Math.floor((now.getTime() - date.getTime()) / 86400000);
+
+  if (diffDays === 0) return "Aujourd'hui";
+  if (diffDays === 1) return "Hier";
+  return date.toLocaleDateString("fr-FR");
+};
+
+const getConversationBadge = (status?: string) => {
+  if (status === "needs_support") return { label: "Support", color: "bg-purple-100 text-purple-700" };
+  if (status === "transferred") return { label: "Support", color: "bg-purple-100 text-purple-700" };
+  return { label: "IA", color: "bg-blue-100 text-blue-700" };
+};
+
+const getConversationStorageKey = (clientId?: string | null) =>
+  clientId ? `tema_chat_conversation_id:${clientId}` : "tema_chat_conversation_id:guest";
+
 export default function ChatbotPage() {
+  const client = getStoredClient();
+  const isClientLoggedIn = Boolean(getClientToken());
+  const conversationStorageKey = getConversationStorageKey(client?.id);
+
   const [message, setMessage] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [conversationId, setConversationId] = useState<string | null>(
-    () => localStorage.getItem("tema_chat_conversation_id")
-  );
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<ConversationFromApi[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 1,
-      type: "bot",
-      content: "Bonjour ! Je suis l'assistant IA de Tema Concept. Je peux vous aider à découvrir nos services, demander un devis ou suivre une demande.",
-      timestamp: new Date(Date.now() - 60000)
-    }
-  ]);
+  const [supportRequested, setSupportRequested] = useState(false);
+  const [activeQuickQuestion, setActiveQuickQuestion] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([WELCOME_MESSAGE]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const currentConversationIdRef = useRef<string | null>(null);
+  const latestRequestRef = useRef(0);
+
+  const loadClientConversations = useCallback(async () => {
+    if (!isClientLoggedIn) return;
+
+    try {
+      const response = await getClientConversations();
+      if (response.success && Array.isArray(response.data)) {
+        setConversations(response.data);
+      }
+    } catch {
+      // chargement silencieux
+    }
+  }, [isClientLoggedIn]);
+
+  const loadConversationMessages = useCallback(async (id: string) => {
+    try {
+      const response = await getConversationById(id);
+      if (response.success && response.data) {
+        setMessages(mapApiMessages(response.data.messages));
+        setSupportRequested(
+          Boolean(response.data.handoff || response.data.status === "needs_support" || response.data.status === "transferred")
+        );
+      }
+    } catch {
+      setConversationId(null);
+      localStorage.removeItem(conversationStorageKey);
+      setMessages([WELCOME_MESSAGE]);
+    }
+  }, [conversationStorageKey]);
+
+  useEffect(() => {
+    void loadClientConversations();
+  }, [loadClientConversations]);
+
+  useEffect(() => {
+    const storedConversationId = localStorage.getItem(conversationStorageKey);
+    setConversationId(storedConversationId);
+    currentConversationIdRef.current = storedConversationId;
+    setSupportRequested(false);
+    setMessages([WELCOME_MESSAGE]);
+  }, [conversationStorageKey]);
+
+  useEffect(() => {
+    if (conversationId) {
+      void loadConversationMessages(conversationId);
+    }
+  }, [conversationId, loadConversationMessages]);
+
+  useEffect(() => {
+    if (!isClientLoggedIn) return;
+
+    const interval = window.setInterval(() => {
+      void loadClientConversations();
+    }, 10000);
+
+    return () => window.clearInterval(interval);
+  }, [isClientLoggedIn, loadClientConversations]);
+
+  useEffect(() => {
+    if (!conversationId || !supportRequested) return;
+
+    const interval = window.setInterval(() => {
+      void loadConversationMessages(conversationId);
+    }, 8000);
+
+    return () => window.clearInterval(interval);
+  }, [conversationId, supportRequested, loadConversationMessages]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -58,80 +166,157 @@ export default function ChatbotPage() {
 
   const handleSendMessage = async (text: string) => {
     if (!text.trim() || isLoading) return;
+    const requestId = Date.now();
+    latestRequestRef.current = requestId;
 
     const userMessage: Message = {
-      id: messages.length + 1,
+      id: `local-${Date.now()}`,
       type: "user",
       content: text,
-      timestamp: new Date()
+      timestamp: new Date(),
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    setMessages((prev) => [...prev, userMessage]);
     setMessage("");
     setIsLoading(true);
 
     const isServicesQuestion = text.toLowerCase().includes("service") || text.toLowerCase().includes("proposez");
 
     try {
-      const response = await sendChatMessage(text, conversationId);
-      const { conversationId: newConvId, reply } = response.data!;
+      const activeConversationId = currentConversationIdRef.current;
+      const response = await sendChatMessage(text, activeConversationId);
+      if (latestRequestRef.current !== requestId) return;
+      const data = response.data!;
 
-      if (newConvId && newConvId !== conversationId) {
-        setConversationId(newConvId);
-        localStorage.setItem("tema_chat_conversation_id", newConvId);
+      if (data.conversationId && data.conversationId !== activeConversationId) {
+        setConversationId(data.conversationId);
+        currentConversationIdRef.current = data.conversationId;
+        localStorage.setItem(conversationStorageKey, data.conversationId);
       }
 
-      const botResponse: Message = {
-        id: messages.length + 2,
-        type: "bot",
-        content: reply,
-        timestamp: new Date(),
-        serviceCards: isServicesQuestion
-      };
-      setMessages(prev => [...prev, botResponse]);
-    } catch {
-      const botResponse: Message = {
-        id: messages.length + 2,
-        type: "bot",
-        content: "Désolé, une erreur est survenue. Veuillez réessayer.",
-        timestamp: new Date()
-      };
-      setMessages(prev => [...prev, botResponse]);
+      if (data.messages?.length) {
+        setMessages(mapApiMessages(data.messages));
+      } else if (data.reply) {
+        const botResponse: Message = {
+          id: `bot-${Date.now()}`,
+          type: "bot",
+          content: data.reply,
+          timestamp: new Date(),
+          serviceCards: isServicesQuestion,
+        };
+        setMessages((prev) => [...prev, botResponse]);
+      }
+
+      if (data.handoff || data.awaitingSupport) {
+        setSupportRequested(true);
+      }
+
+      if (isClientLoggedIn) {
+        await loadClientConversations();
+      }
+    } catch (err) {
+      if (latestRequestRef.current !== requestId) return;
+      const errorMessage = err instanceof Error ? err.message : "Désolé, une erreur est survenue. Veuillez réessayer.";
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `error-${Date.now()}`,
+          type: "bot",
+          content: errorMessage,
+          timestamp: new Date(),
+        },
+      ]);
     } finally {
-      setIsLoading(false);
+      if (latestRequestRef.current === requestId) {
+        setActiveQuickQuestion(null);
+        setIsLoading(false);
+      }
     }
   };
 
+  const handleSelectConversation = async (id: string) => {
+    setConversationId(id);
+    currentConversationIdRef.current = id;
+    localStorage.setItem(conversationStorageKey, id);
+    setSidebarOpen(false);
+    await loadConversationMessages(id);
+  };
+
   const handleNewConversation = () => {
+    latestRequestRef.current = Date.now();
     setConversationId(null);
-    localStorage.removeItem("tema_chat_conversation_id");
-    setMessages([
-      {
-        id: 1,
-        type: "bot",
-        content: "Bonjour ! Je suis l'assistant IA de Tema Concept. Je peux vous aider à découvrir nos services, demander un devis ou suivre une demande.",
-        timestamp: new Date()
+    currentConversationIdRef.current = null;
+    setSupportRequested(false);
+    setMessage("");
+    setIsLoading(false);
+    setActiveQuickQuestion(null);
+    localStorage.removeItem(conversationStorageKey);
+    setMessages([WELCOME_MESSAGE]);
+    setSidebarOpen(false);
+  };
+
+  const handleSupportRequest = async () => {
+    if (isLoading || supportRequested) return;
+
+    if (!isClientLoggedIn) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `support-login-required-${Date.now()}`,
+          type: "bot",
+          content: "Pour parler au support, veuillez d'abord vous connecter à votre compte.",
+          timestamp: new Date(),
+        },
+      ]);
+      return;
+    }
+
+    if (!conversationId) {
+      await handleSendMessage("Je veux parler à un conseiller");
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      await requestConversationSupport(
+        conversationId,
+        "Votre conversation a été transmise au support Tema Concept. Un conseiller pourra reprendre avec le contexte déjà fourni."
+      );
+      setSupportRequested(true);
+      await loadConversationMessages(conversationId);
+      if (isClientLoggedIn) {
+        await loadClientConversations();
       }
-    ]);
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `support-error-${Date.now()}`,
+          type: "bot",
+          content: "Impossible de transférer la conversation pour le moment. Veuillez réessayer dans quelques instants.",
+          timestamp: new Date(),
+        },
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const formatTime = (date: Date) =>
     date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-gray-50 dark:bg-background flex flex-col">
       <Header />
 
       <div className="flex-1 flex max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 gap-6">
-        {/* Mobile sidebar toggle */}
         <button
-          className="lg:hidden fixed bottom-24 left-4 z-40 w-10 h-10 bg-white border border-gray-200 rounded-full shadow-md flex items-center justify-center"
+          className="lg:hidden fixed bottom-24 left-4 z-40 w-10 h-10 bg-card border border-border rounded-full shadow-md flex items-center justify-center"
           onClick={() => setSidebarOpen(!sidebarOpen)}
         >
           {sidebarOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
         </button>
 
-        {/* Sidebar overlay on mobile */}
         {sidebarOpen && (
           <div
             className="lg:hidden fixed inset-0 bg-black/30 z-30"
@@ -139,7 +324,6 @@ export default function ChatbotPage() {
           />
         )}
 
-        {/* Conversation History Sidebar */}
         <aside
           className={`
             fixed lg:static inset-y-0 left-0 z-40 w-72 bg-white lg:bg-transparent
@@ -147,9 +331,9 @@ export default function ChatbotPage() {
             ${sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
           `}
         >
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 h-full lg:h-auto overflow-y-auto">
+          <div className="bg-card rounded-xl shadow-sm border border-border p-4 h-full lg:h-auto overflow-y-auto">
             <div className="flex items-center justify-between mb-4 pt-2 lg:pt-0">
-              <h2 className="text-sm font-semibold text-gray-900">Conversations</h2>
+              <h2 className="text-sm font-semibold text-foreground">Conversations</h2>
               <button
                 className="lg:hidden p-1 text-gray-400 hover:text-gray-600"
                 onClick={() => setSidebarOpen(false)}
@@ -157,6 +341,12 @@ export default function ChatbotPage() {
                 <X className="w-4 h-4" />
               </button>
             </div>
+
+            {isClientLoggedIn && client && (
+              <p className="mb-3 text-xs text-muted-foreground">
+                Connecté en tant que <strong className="text-foreground">{client.name}</strong>
+              </p>
+            )}
 
             <button
               onClick={handleNewConversation}
@@ -167,76 +357,110 @@ export default function ChatbotPage() {
             </button>
 
             <div className="space-y-1">
-              {conversationHistory.map((conv) => (
-                <button
-                  key={conv.id}
-                  className={`w-full text-left px-3 py-2.5 rounded-lg transition-colors ${
-                    conv.active ? "bg-blue-50" : "hover:bg-gray-50"
-                  }`}
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <p className={`text-sm font-medium truncate flex-1 ${conv.active ? "text-blue-700" : "text-gray-700"}`}>
-                      {conv.title}
-                    </p>
-                    <span className={`text-xs px-1.5 py-0.5 rounded-full ${conv.badgeColor} flex-shrink-0`}>
-                      {conv.badge}
-                    </span>
-                  </div>
-                  <p className="text-xs text-gray-400">{conv.date}</p>
-                </button>
-              ))}
+              {isClientLoggedIn ? (
+                conversations.length > 0 ? (
+                  conversations.map((conv) => {
+                    const badge = getConversationBadge(conv.status);
+                    const isActive = conv.id === conversationId;
+
+                    return (
+                      <button
+                        key={conv.id}
+                        onClick={() => void handleSelectConversation(conv.id)}
+                        className={`w-full text-left px-3 py-2.5 rounded-lg transition-colors ${
+                          isActive ? "bg-blue-50 dark:bg-blue-950/40" : "hover:bg-accent"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          <p className={`text-sm font-medium truncate flex-1 ${isActive ? "text-blue-700" : "text-gray-700"}`}>
+                            {conv.subject || "Conversation"}
+                          </p>
+                          <span className={`text-xs px-1.5 py-0.5 rounded-full ${badge.color} flex-shrink-0`}>
+                            {badge.label}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-400">{formatConversationDate(conv.updatedAt || conv.createdAt)}</p>
+                      </button>
+                    );
+                  })
+                ) : (
+                  <p className="px-2 py-3 text-xs text-muted-foreground">
+                    Aucune conversation enregistrée. Démarrez un échange pour le sauvegarder sur votre compte.
+                  </p>
+                )
+              ) : (
+                <p className="px-2 py-3 text-xs text-muted-foreground">
+                  <Link to="/login" className="text-blue-600 hover:underline">Connectez-vous</Link> pour enregistrer vos conversations sur votre compte.
+                </p>
+              )}
             </div>
           </div>
         </aside>
 
-        {/* Main Chat Area */}
-        <div className="flex-1 flex flex-col bg-white rounded-xl shadow-sm border border-gray-100 min-h-0" style={{ height: "calc(100vh - 10rem)" }}>
-          {/* Chat Header */}
-          <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+        <div className="flex-1 flex flex-col bg-card rounded-xl shadow-sm border border-border min-h-0" style={{ height: "calc(100vh - 10rem)" }}>
+          <div className="p-5 border-b border-border flex items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-3">
-              <div className="w-11 h-11 bg-gradient-to-br from-blue-600 to-blue-500 rounded-full flex items-center justify-center">
-                <Bot className="w-6 h-6 text-white" />
-              </div>
+              <TemaLogo variant="avatar" />
               <div>
-                <h1 className="font-semibold text-gray-900">Assistant IA de Tema Concept</h1>
+                <h1 className="font-semibold text-foreground">Assistant IA de Tema Concept</h1>
                 <p className="text-xs text-green-600 flex items-center gap-1">
                   <span className="w-2 h-2 bg-green-500 rounded-full inline-block"></span>
-                  En ligne • Temps de réponse : ~2s
+                  {supportRequested ? "Support en cours • réponses humaines possibles" : "En ligne • Temps de réponse : ~2s"}
                 </p>
               </div>
             </div>
 
-            <button className="px-4 py-2 bg-green-50 text-green-700 rounded-lg text-sm font-medium hover:bg-green-100 transition-colors flex items-center gap-2 border border-green-200">
+            <button
+              type="button"
+              onClick={() => void handleSupportRequest()}
+              disabled={isLoading || supportRequested || !isClientLoggedIn}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 border ${
+                supportRequested
+                  ? "bg-amber-50 text-amber-700 border-amber-200 cursor-default"
+                  : isClientLoggedIn
+                    ? "bg-green-50 text-green-700 hover:bg-green-100 border-green-200"
+                    : "bg-gray-100 text-gray-500 border-gray-200 cursor-not-allowed"
+              } disabled:opacity-70`}
+            >
               <HeadphonesIcon className="w-4 h-4" />
-              <span className="hidden sm:inline">Parler à un conseiller</span>
-              <span className="sm:hidden">Conseiller</span>
+              <span className="hidden sm:inline">{supportRequested ? "Support demandé" : "Transférer au support"}</span>
+              <span className="sm:hidden">Support</span>
             </button>
           </div>
 
-          {/* Messages Area */}
           <div className="flex-1 overflow-y-auto p-5 space-y-4">
             {messages.map((msg) => (
               <div key={msg.id} className={`flex gap-3 ${msg.type === "user" ? "flex-row-reverse" : ""}`}>
-                <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                    msg.type === "bot" ? "bg-blue-100 text-blue-600" : "bg-gray-200 text-gray-600"
-                  }`}
-                >
-                  {msg.type === "bot" ? <Bot className="w-4 h-4" /> : <User className="w-4 h-4" />}
+                <div className="flex-shrink-0">
+                  {msg.type === "user" ? (
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-200 text-gray-600">
+                      <User className="h-4 w-4" />
+                    </div>
+                  ) : msg.type === "support" ? (
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-green-100 text-green-700">
+                      <HeadphonesIcon className="h-4 w-4" />
+                    </div>
+                  ) : (
+                    <TemaLogo variant="message" />
+                  )}
                 </div>
 
                 <div className={`flex flex-col max-w-[75%] ${msg.type === "user" ? "items-end" : ""}`}>
+                  {msg.type === "support" && (
+                    <p className="mb-1 text-[11px] font-medium text-green-700">Support Tema Concept</p>
+                  )}
                   <div
                     className={`rounded-2xl px-4 py-3 ${
-                      msg.type === "bot"
-                        ? "bg-gray-100 text-gray-900 rounded-tl-sm"
-                        : "bg-blue-600 text-white rounded-tr-sm"
+                      msg.type === "user"
+                        ? "bg-blue-600 text-white rounded-tr-sm"
+                        : msg.type === "support"
+                          ? "bg-green-50 text-green-900 border border-green-200 rounded-tl-sm"
+                          : "bg-gray-100 text-gray-900 rounded-tl-sm"
                     }`}
                   >
                     <p className="text-sm">{msg.content}</p>
                   </div>
 
-                  {/* Service Cards inside bot message */}
                   {msg.serviceCards && (
                     <div className="mt-3 grid grid-cols-2 gap-2 w-full max-w-sm">
                       {serviceCards.map((card) => (
@@ -272,14 +496,21 @@ export default function ChatbotPage() {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Suggested Questions */}
           <div className="px-5 py-3 border-t border-gray-100 bg-gray-50 flex-shrink-0">
             <div className="flex flex-wrap gap-2">
-              {suggestedQuestions.map((q, i) => (
+              {suggestedQuestions.map((q) => (
                 <button
-                  key={i}
-                  onClick={() => handleSendMessage(q)}
-                  className="px-3 py-1.5 bg-white text-gray-600 rounded-full text-xs hover:bg-blue-50 hover:text-blue-600 transition-colors border border-gray-200"
+                  key={q}
+                  onClick={() => {
+                    setActiveQuickQuestion(q);
+                    void handleSendMessage(q);
+                  }}
+                  disabled={isLoading}
+                  className={`px-3 py-1.5 rounded-full text-xs transition-colors border ${
+                    activeQuickQuestion === q
+                      ? "bg-blue-100 text-blue-700 border-blue-300"
+                      : "bg-white text-gray-600 hover:bg-blue-50 hover:text-blue-600 border-gray-200"
+                  } ${isLoading ? "opacity-60 cursor-not-allowed" : ""}`}
                 >
                   {q}
                 </button>
@@ -287,7 +518,6 @@ export default function ChatbotPage() {
             </div>
           </div>
 
-          {/* Input Area */}
           <div className="p-5 border-t border-gray-100 flex-shrink-0">
             <div className="flex gap-3">
               <input
@@ -297,14 +527,14 @@ export default function ChatbotPage() {
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
-                    handleSendMessage(message);
+                    void handleSendMessage(message);
                   }
                 }}
-                placeholder="Décrivez votre besoin ou posez une question..."
+                placeholder={supportRequested ? "Écrivez votre message au support..." : "Décrivez votre besoin ou posez une question..."}
                 className="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
               />
               <button
-                onClick={() => handleSendMessage(message)}
+                onClick={() => void handleSendMessage(message)}
                 disabled={!message.trim() || isLoading}
                 className={`px-5 py-3 rounded-xl font-medium transition-colors flex items-center gap-2 text-sm ${
                   message.trim() && !isLoading
@@ -317,7 +547,9 @@ export default function ChatbotPage() {
               </button>
             </div>
             <p className="text-xs text-gray-400 mt-2 text-center">
-              L'assistant IA peut faire des erreurs. Pour les informations importantes, contactez un conseiller.
+              {isClientLoggedIn
+                ? "Vos conversations sont enregistrées sur votre compte."
+                : "Connectez-vous pour sauvegarder vos conversations."}
             </p>
           </div>
         </div>

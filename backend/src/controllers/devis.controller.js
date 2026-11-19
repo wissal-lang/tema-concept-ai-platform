@@ -53,6 +53,26 @@ export const getAllDevis = async (req, res) => {
   }
 };
 
+export const getMyDevis = async (req, res) => {
+  try {
+    const devis = await prisma.devisRequest.findMany({
+      where: { email: req.client.email },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: devis,
+    });
+  } catch (error) {
+    console.error("Erreur récupération devis client:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Erreur serveur lors de la récupération de vos demandes.",
+    });
+  }
+};
+
 export const getDevisById = async (req, res) => {
   try {
     const devis = await prisma.devisRequest.findUnique({
